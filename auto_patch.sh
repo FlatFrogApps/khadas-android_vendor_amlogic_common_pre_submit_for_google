@@ -88,6 +88,10 @@ LOCAL_PATH=$T/$(dirname $0)/
 
 need_tv_feature=$1
 is_android_tv=$2
+#we default use ATV version
+if [ ! $is_android_tv ]; then
+is_android_tv=true
+fi
 
 echo -e "Params: need_tv_feature=[$need_tv_feature], is_android_tv=[$is_android_tv]."
 
