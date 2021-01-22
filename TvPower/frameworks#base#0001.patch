@@ -1,0 +1,75 @@
+From 48b5f572a31768738b30655b90d6a667efbbf9ed Mon Sep 17 00:00:00 2001
+From: yuehu mi <yuehu.mi@amlogic.com>
+Date: Fri, 22 Jan 2021 10:24:05 +0800
+Subject: [PATCH] PowerKey: add power key function settings [2/2]
+
+PD#SWPL-41332
+
+Problem:
+Short press of power key only has suspend function
+
+Solution:
+Modify the power key function through persist.sys.power.key.action
+
+Verify:
+verify by t5d
+
+Change-Id: Ifd461468d65a2e389aad368e737520de04ecc523
+Signed-off-by: yuehu mi <yuehu.mi@amlogic.com>
+---
+ .../server/policy/PhoneWindowManager.java     | 22 ++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+ mode change 100644 => 100755 services/core/java/com/android/server/policy/PhoneWindowManager.java
+
+diff --git a/services/core/java/com/android/server/policy/PhoneWindowManager.java b/services/core/java/com/android/server/policy/PhoneWindowManager.java
+old mode 100644
+new mode 100755
+index fde9f3274de1..15fb431c3b86
+--- a/services/core/java/com/android/server/policy/PhoneWindowManager.java
++++ b/services/core/java/com/android/server/policy/PhoneWindowManager.java
+@@ -224,6 +224,10 @@ import java.io.PrintWriter;
+ import java.util.HashSet;
+ import java.util.List;
+ 
++import android.content.ContentValues;
++import android.database.Cursor;
++import android.net.Uri;
++
+ /**
+  * WindowManagerPolicy implementation for the Android phone UI.  This
+  * introduces a new method suffix, Lp, for an internal lock of the
+@@ -1069,6 +1073,10 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+         }
+     }
+ 
++    private static final int POWER_KEY_SUSPEND  = 0;
++    private static final int POWER_KEY_SHUTDOWN = 1;
++    private static final int POWER_KEY_RESTART  = 2;
++
+     private void powerPress(long eventTime, boolean interactive, int count) {
+         if (mDefaultDisplayPolicy.isScreenOnEarly() && !mDefaultDisplayPolicy.isScreenOnFully()) {
+             Slog.i(TAG, "Suppressed redundant power key press while "
+@@ -1078,7 +1086,19 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+         Slog.d(TAG, "powerPress: eventTime=" + eventTime + " interactive=" + interactive
+                 + " count=" + count + " beganFromNonInteractive=" + mBeganFromNonInteractive +
+                 " mShortPressOnPowerBehavior=" + mShortPressOnPowerBehavior);
+-
++        final int definedPowerKey = SystemProperties.getInt("persist.sys.power.key.action", POWER_KEY_SUSPEND);
++        final boolean ddrWindow = SystemProperties.getBoolean("ro.first.boot.ddr.window", false);
++        Slog.d(TAG, "definedPowerKey=" + definedPowerKey + ",ddrWindow=" + ddrWindow);
++        if (definedPowerKey == POWER_KEY_SHUTDOWN || ddrWindow) {
++            mPowerManager.shutdown(false,"userrequested",false);
++            Slog.i(TAG, "shutdown here");
++            return;
++        }
++        if (definedPowerKey == POWER_KEY_RESTART) {
++            mPowerManager.reboot("");
++            Slog.i(TAG, "reboot here");
++            return;
++        }
+         if (count == 2) {
+             powerMultiPressAction(eventTime, interactive, mDoublePressOnPowerBehavior);
+         } else if (count == 3) {
+-- 
+2.29.0
+
