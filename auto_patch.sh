@@ -55,13 +55,13 @@ function traverse_patch_dir()
             continue
         fi
         # ATV don't apply AOSP patch
-        if [[ "$is_android_tv" == "true" && "$file" =~ "aosp_ui" ]]
+        if [[ "$is_android_tv" != "false" && "$file" =~ "aosp_ui" ]]
         then
             # echo "###ATV version, don't need this patch:$file###      "
             continue
         fi
         # ATV patch only patch in ATV version
-        if [[ "$is_android_tv" != "true" && "$file" =~ "gtvs_ui" ]]
+        if [[ "$is_android_tv" == "false" && "$file" =~ "gtvs_ui" ]]
         then
             #echo "### AOSP version, don't need this patch:$file###      "
             continue
