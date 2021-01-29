@@ -1,0 +1,87 @@
+From 33594280e0225b68d97d77a25f90a2c3c6094727 Mon Sep 17 00:00:00 2001
+From: an.xi <an.xi@amlogic.com>
+Date: Tue, 22 Dec 2020 03:03:41 -0500
+Subject: [PATCH] cec: open volume keyevent paththrough for NTS [2/2]
+
+PD#SWPL-39241
+
+Problem:
+NTS volume paththrough feature. When user uses playback's
+remote to control volume in ddp5.0 format, playback should
+transfer the volume keyevents to tv.
+
+Solution:
+Transfer the volume keyevents to TV when the playback is
+using dpp5.0 audio format.
+
+Verify:
+newton
+
+Change-Id: I3e3f53b7c64a17fb204ffba9d3189b2ae3f74b6f
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index 9312cfb..009d860 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -107,6 +107,7 @@
+ 
+ // TODO: Move these macro/inlines to a header file.
+ #define max(a, b) ((a) > (b) ? (a) : (b))
++#define PROP_VOLUME_PASSTHROUGH "sys.audio.passthrough"
+ template <typename T>
+ static inline T min(const T& a, const T& b)
+ {
+@@ -1947,6 +1948,20 @@
+     //       converted to use audio HAL extensions required to support tunneling
+     status_t result = mOutput->stream->setParameters(String8("exiting=1"));
+     ALOGE_IF(result != OK, "Error when setting parameters on exit: %d", result);
++
++    ALOGD("preExit  HAL format: 0x%x.", mHALFormat);
++    // NTS feature:2.0ch no passthrough, 5.1ch passthrough.
++    switch (mHALFormat) {
++        case AUDIO_FORMAT_E_AC3:
++        case AUDIO_FORMAT_AC3:
++        case AUDIO_FORMAT_DTS:
++        case AUDIO_FORMAT_DTS_HD:
++            ALOGD("disable volume passthrough.");
++            property_set(PROP_VOLUME_PASSTHROUGH, "false");
++            break;
++        default:
++            break;
++     }
+ }
+ 
+ void AudioFlinger::PlaybackThread::dumpTracks_l(int fd, const Vector<String16>& args __unused)
+@@ -2077,6 +2092,8 @@
+     audio_output_flags_t requestedFlags = *flags;
+     uint32_t sampleRate;
+ 
++    ALOGD("PlaybackThread createTrack_l format %8x", format);
++
+     if (sharedBuffer != 0 && checkIMemory(sharedBuffer) != NO_ERROR) {
+         lStatus = BAD_VALUE;
+         goto Exit;
+@@ -2732,6 +2749,21 @@
+ 
+     // Get actual HAL format.
+     status_t result = mOutput->stream->getFormat(&mHALFormat);
++
++    ALOGD("PlaybackThread readOutputParameters_l HAL format: 0x%x.", mHALFormat);
++    // NTS feature:2.0ch no passthrough, 5.1ch passthrough.
++    switch (mHALFormat) {
++        case AUDIO_FORMAT_E_AC3:
++        case AUDIO_FORMAT_AC3:
++        case AUDIO_FORMAT_DTS:
++        case AUDIO_FORMAT_DTS_HD:
++            ALOGD("enable volume passthrough.");
++            property_set(PROP_VOLUME_PASSTHROUGH, "true");
++            break;
++        default:
++            break;
++     }
++
+     LOG_ALWAYS_FATAL_IF(result != OK, "Error when retrieving output stream format: %d", result);
+     // Get format from the shim, which will be different than the HAL format
+     // if playing compressed audio over HDMI passthrough.
