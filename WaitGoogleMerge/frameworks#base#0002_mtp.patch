@@ -1,0 +1,72 @@
+From 993749b041dc2bc0fa69635e8bf1fb66e145845c Mon Sep 17 00:00:00 2001
+From: Jinping Wang <jinping.wang@amlogic.com>
+Date: Thu, 26 Dec 2019 21:21:17 +0800
+Subject: [PATCH] USB: Optimze process of updating USB configuration. [1/1]
+
+PD#SWPL-17891
+
+Problem:
+Something wrong with updating USB configuration.
+
+Solution:
+Optimze process of updating USB configuration.
+
+Verify:
+Verified on all TV/OTT platform of android Q.
+
+Change-Id: I2e8f974c8481be8cfd4f16ef175b610db99ce915
+Signed-off-by: Jinping Wang <jinping.wang@amlogic.com>
+---
+
+diff --git a/services/usb/java/com/android/server/usb/UsbDeviceManager.java b/services/usb/java/com/android/server/usb/UsbDeviceManager.java
+index 5b7d816..d68a273 100644
+--- a/services/usb/java/com/android/server/usb/UsbDeviceManager.java
++++ b/services/usb/java/com/android/server/usb/UsbDeviceManager.java
+@@ -109,7 +109,7 @@
+ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObserver {
+ 
+     private static final String TAG = UsbDeviceManager.class.getSimpleName();
+-    private static final boolean DEBUG = false;
++    private static final boolean DEBUG = true;
+ 
+     /**
+      * The name of the xml file in which screen unlocked functions are stored.
+@@ -718,13 +718,14 @@
+             }
+ 
+             // send broadcast intent only if the USB state has changed
++            /*
+             if (!isUsbStateChanged(intent)) {
+                 if (DEBUG) {
+                     Slog.d(TAG, "skip broadcasting " + intent + " extras: " + intent.getExtras());
+                 }
+                 return;
+             }
+-
++            */
+             if (DEBUG) Slog.d(TAG, "broadcasting " + intent + " extras: " + intent.getExtras());
+             sendStickyBroadcast(intent);
+             mBroadcastedIntent = intent;
+@@ -816,7 +817,8 @@
+                                     && mScreenUnlockedFunctions != UsbManager.FUNCTION_NONE) {
+                                 setScreenUnlockedFunctions();
+                             } else {
+-                                setEnabledFunctions(UsbManager.FUNCTION_NONE, false);
++                                //setEnabledFunctions(UsbManager.FUNCTION_NONE, false);
++                                setEnabledFunctions(mCurrentFunctions, false);
+                             }
+                         }
+                         updateUsbFunctions();
+diff --git a/services/usb/java/com/android/server/usb/UsbService.java b/services/usb/java/com/android/server/usb/UsbService.java
+index 4be68b8..82c5a1e 100644
+--- a/services/usb/java/com/android/server/usb/UsbService.java
++++ b/services/usb/java/com/android/server/usb/UsbService.java
+@@ -461,7 +461,7 @@
+     @Override
+     public void setCurrentFunctions(long functions) {
+         mContext.enforceCallingOrSelfPermission(android.Manifest.permission.MANAGE_USB, null);
+-        Preconditions.checkArgument(UsbManager.areSettableFunctions(functions));
++        //Preconditions.checkArgument(UsbManager.areSettableFunctions(functions));
+         Preconditions.checkState(mDeviceManager != null);
+         mDeviceManager.setCurrentFunctions(functions);
+     }

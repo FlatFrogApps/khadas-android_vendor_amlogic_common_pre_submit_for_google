@@ -48,9 +48,18 @@ function auto_patch()
 function traverse_patch_dir()
 {
     local local_dir=$1
+    
+    # apply google patch at first
+    auto_patch $local_dir/WaitGoogleMerge
+    if [[ "$is_reference_project" == "true" ]]
+    then
+        echo " reference project patch finished;"
+        exit 
+    fi
+    
     for file in `ls $local_dir`
     do
-        if [[ "$file" =~ ".md" || "$file" =~ ".sh" ]]
+        if [[ "$file" =~ ".md" || "$file" =~ ".sh" || "$file" =~ "WaitGoogleMerge" ]]
         then
             continue
         fi
@@ -86,14 +95,21 @@ function traverse_patch_dir()
 T=$(pwd)
 LOCAL_PATH=$T/$(dirname $0)/
 
-need_tv_feature=$1
-is_android_tv=$2
+is_reference_project=$1
+need_tv_feature=$2
+is_android_tv=$3
+
 #we default use ATV version
 if [ ! $is_android_tv ]; then
-is_android_tv=true
+   is_android_tv=true
 fi
 
-echo -e "Params: need_tv_feature=[$need_tv_feature], is_android_tv=[$is_android_tv]."
+if [[ "$is_android_tv" != "true" ]]
+then
+   is_reference_project=false
+fi
+
+echo -e "Params: is_reference_project=[$is_reference_project],need_tv_feature=[$need_tv_feature], is_android_tv=[$is_android_tv];"
 
 traverse_patch_dir $LOCAL_PATH
 
