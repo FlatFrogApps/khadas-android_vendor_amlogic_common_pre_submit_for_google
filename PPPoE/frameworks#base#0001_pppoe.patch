@@ -1,0 +1,57 @@
+From 2258e94eaf2e07bf55b83fd41489d377c2c1b8b3 Mon Sep 17 00:00:00 2001
+From: "shuai.zhang" <shuai.zhang@amlogic.com>
+Date: Tue, 2 Feb 2021 14:44:35 +0800
+Subject: [PATCH] PPPoE: bring up from p to r [2/5]
+
+PD#SWPL-33463
+
+Problem:
+PPPoE bring up from andriod p to android r
+
+Solution:
+PPPoE bring up from andriod p to android r
+
+Verify:
+newton
+
+Change-Id: Ibe04e6630fae685c9ea7d3fc7cb976259c8eab48
+Signed-off-by: shuai.zhang<shuai.zhang@amlogic.com>
+---
+ core/res/AndroidManifest.xml                       | 4 ++++
+ services/java/com/android/server/SystemServer.java | 5 +++++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/core/res/AndroidManifest.xml b/core/res/AndroidManifest.xml
+index 6a9421c31d1b..efa4816b5732 100644
+--- a/core/res/AndroidManifest.xml
++++ b/core/res/AndroidManifest.xml
+@@ -638,6 +638,10 @@
+     <protected-broadcast android:name="android.intent.action.DOCK_IDLE" />
+     <protected-broadcast android:name="android.intent.action.DOCK_ACTIVE" />
+ 
++    <!-- For PPPoE -->
++    <protected-broadcast android:name="com.droidlogic.linkchange" />
++    <protected-broadcast android:name="com.droidlogic.pppoe.PPPOE_STATE_CHANGED" />
++
+     <!-- Added in Q -->
+     <protected-broadcast android:name="android.content.pm.action.SESSION_UPDATED" />
+     <protected-broadcast android:name="android.settings.action.GRAYSCALE_CHANGED" />
+diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
+index 2a200fb0ae2c..c649aeb64dd5 100644
+--- a/services/java/com/android/server/SystemServer.java
++++ b/services/java/com/android/server/SystemServer.java
+@@ -1435,6 +1435,11 @@ public final class SystemServer {
+             }
+             t.traceEnd();
+ 
++            if (SystemProperties.get("ro.vendor.platform.has.pppoe").equals("true")) {
++                t.traceBegin("StartPppoe_wrapperService");
++                SystemProperties.set("ctl.start", "pppoe_wrapper");
++                t.traceEnd();
++            }
+ 
+             t.traceBegin("StartIpSecService");
+             try {
+-- 
+2.29.0
+
