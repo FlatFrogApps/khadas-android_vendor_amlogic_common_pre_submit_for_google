@@ -26,7 +26,7 @@ function auto_patch()
             local dir_name1=${resFile//#/\/};     #echo dir_name $dir_name
             local dir_name=${dir_name1%/*};       #echo dir_name $dir_name
             local dir=$T/$dir_name;               #echo $dir
-            local change_id=`grep 'Change-Id' $file | cut -f 2 -d " "`
+            local change_id=`grep 'Change-Id' $file | head -n1 | awk '{print $2}'`
             if [ -d "$dir" ]
             then
                 cd $dir; git log -n 100 | grep $change_id 1>/dev/null 2>&1;

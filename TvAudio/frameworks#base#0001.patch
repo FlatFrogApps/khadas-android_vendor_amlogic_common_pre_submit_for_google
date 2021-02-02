@@ -1,0 +1,106 @@
+From 79cbb66e28603d567c895dca7a809256e69f1a91 Mon Sep 17 00:00:00 2001
+From: "hongchao.yin" <hongchao.yin@amlogic.com>
+Date: Tue, 15 Dec 2020 14:08:08 +0800
+Subject: [PATCH] Audio: Merge framework base from P and Q to R autopatchs
+ [1/1]
+
+PD#SWPL-35207
+
+Problem:
+[Android R] audio framework and app code merge from P and Q
+
+Solution:
+Put the patches together into one.
+(1). Do not seed a unmute msg when plug HDMI cable.
+(I111c8352818a3c08d732520e392fff327aea5059)
+(2). change volume type follow.
+(Ice4c63a0cdb00a21d96bf4442d235aa1490eeabd)
+(3). connect bt remote control mistake as usb output, and it would set
+a2dp off should check device is input or output feature.
+(I61bda0cd9aec32c0c13a4193664d37c7d0a69098)
+
+Verify:
+U215
+
+Change-Id: Ieb194d4a1de93e073b731e18b92fc4e0bdb6bf06
+Signed-off-by: hongchao.yin <hongchao.yin@amlogic.com>
+---
+ .../server/audio/AudioDeviceInventory.java      | 17 +++++++++++++++--
+ .../com/android/server/audio/AudioService.java  | 15 ++++++++++++---
+ 2 files changed, 27 insertions(+), 5 deletions(-)
+ mode change 100755 => 100644 services/core/java/com/android/server/audio/AudioService.java
+
+diff --git a/services/core/java/com/android/server/audio/AudioDeviceInventory.java b/services/core/java/com/android/server/audio/AudioDeviceInventory.java
+index 02a846e3dc82..6be3c2f07d15 100644
+--- a/services/core/java/com/android/server/audio/AudioDeviceInventory.java
++++ b/services/core/java/com/android/server/audio/AudioDeviceInventory.java
+@@ -548,6 +548,10 @@ public class AudioDeviceInventory {
+                                 ? MediaMetrics.Value.DISCONNECTED : MediaMetrics.Value.CONNECTED);
+         synchronized (mDevicesLock) {
+             if ((wdcs.mState == AudioService.CONNECTION_STATE_DISCONNECTED)
++                    /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++                    /* Change-Id: I61bda0cd9aec32c0c13a4193664d37c7d0a69098 */
++                    && ((wdcs.mType & AudioSystem.DEVICE_BIT_IN) == 0)
++                    /*[Amlogic end]-----------------------------------------------------------*/
+                     && DEVICE_OVERRIDE_A2DP_ROUTE_ON_PLUG_SET.contains(wdcs.mType)) {
+                 mDeviceBroker.setBluetoothA2dpOnInt(true, false /*fromA2dp*/,
+                         "onSetWiredDeviceConnectionState state DISCONNECTED");
+@@ -561,7 +565,11 @@ public class AudioDeviceInventory {
+                 return;
+             }
+             if (wdcs.mState != AudioService.CONNECTION_STATE_DISCONNECTED) {
+-                if (DEVICE_OVERRIDE_A2DP_ROUTE_ON_PLUG_SET.contains(wdcs.mType)) {
++                if (DEVICE_OVERRIDE_A2DP_ROUTE_ON_PLUG_SET.contains(wdcs.mType)
++                        /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++                        /* Change-Id: I61bda0cd9aec32c0c13a4193664d37c7d0a69098 */
++                        && ((wdcs.mType & AudioSystem.DEVICE_BIT_IN) == 0)) {
++                        /*[Amlogic end]-----------------------------------------------------------*/
+                     mDeviceBroker.setBluetoothA2dpOnInt(false, false /*fromA2dp*/,
+                             "onSetWiredDeviceConnectionState state not DISCONNECTED");
+                 }
+@@ -692,7 +700,12 @@ public class AudioDeviceInventory {
+                 }
+                 mConnectedDevices.put(deviceKey, new DeviceInfo(
+                         device, deviceName, address, AudioSystem.AUDIO_FORMAT_DEFAULT));
+-                mDeviceBroker.postAccessoryPlugMediaUnmute(device);
++                /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++                /* Change-Id: I111c8352818a3c08d732520e392fff327aea5059 */
++                if (device != AudioSystem.DEVICE_OUT_HDMI) {
++                    mDeviceBroker.postAccessoryPlugMediaUnmute(device);
++                }
++                /*[Amlogic end]-----------------------------------------------------------*/
+                 mmi.set(MediaMetrics.Property.STATE, MediaMetrics.Value.CONNECTED).record();
+                 return true;
+             } else if (!connect && isConnected) {
+diff --git a/services/core/java/com/android/server/audio/AudioService.java b/services/core/java/com/android/server/audio/AudioService.java
+old mode 100755
+new mode 100644
+index c4eca605206d..eb374c2b6487
+--- a/services/core/java/com/android/server/audio/AudioService.java
++++ b/services/core/java/com/android/server/audio/AudioService.java
+@@ -367,10 +367,19 @@ public class AudioService extends IAudioService.Stub
+     };
+     private final int[] STREAM_VOLUME_ALIAS_TELEVISION = new int[] {
+         AudioSystem.STREAM_MUSIC,       // STREAM_VOICE_CALL
+-        AudioSystem.STREAM_MUSIC,       // STREAM_SYSTEM
+-        AudioSystem.STREAM_MUSIC,       // STREAM_RING
++
++        /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++        /* Change-Id: Ice4c63a0cdb00a21d96bf4442d235aa1490eeabd */
++        AudioSystem.STREAM_SYSTEM,       // STREAM_SYSTEM
++        AudioSystem.STREAM_RING,       // STREAM_RING
++        /*[Amlogic end]-----------------------------------------------------------*/
+         AudioSystem.STREAM_MUSIC,       // STREAM_MUSIC
+-        AudioSystem.STREAM_MUSIC,       // STREAM_ALARM
++
++        /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++        /* Change-Id: Ice4c63a0cdb00a21d96bf4442d235aa1490eeabd */
++        AudioSystem.STREAM_ALARM,       // STREAM_ALARM
++        /*[Amlogic end]-----------------------------------------------------------*/
++
+         AudioSystem.STREAM_MUSIC,       // STREAM_NOTIFICATION
+         AudioSystem.STREAM_BLUETOOTH_SCO,       // STREAM_BLUETOOTH_SCO
+         AudioSystem.STREAM_MUSIC,       // STREAM_SYSTEM_ENFORCED
+-- 
+2.25.0
+

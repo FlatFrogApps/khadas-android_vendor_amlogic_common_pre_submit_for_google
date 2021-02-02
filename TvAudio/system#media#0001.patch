@@ -1,0 +1,44 @@
+From 0c8c7207c006d2b3d5746392d5070b55c230815a Mon Sep 17 00:00:00 2001
+From: "hongchao.yin" <hongchao.yin@amlogic.com>
+Date: Tue, 15 Dec 2020 12:16:14 +0800
+Subject: [PATCH] AudioPolicy:add AUDIO_POLICY_FORCE_SPDIF and ARC [1/1]
+
+PD#SWPL-35207
+
+Problem:
+[Android R] audio framework and app code merge from P and Q
+
+Solution:
+Put the patches together into one.
+(1).add AUDIO_POLICY_FORCE_SPDIF AUDIO_POLICY_FORCE_HDMI_ARC force type.
+ (Ib60e6a943214c201915bc811c82d8e17e8e4859a)
+
+Verify:
+U215
+
+Change-Id: Ib6073ff07f96af0437e97122334551158a8f1712
+Signed-off-by: hongchao.yin <hongchao.yin@amlogic.com>
+---
+ audio/include/system/audio_policy.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/audio/include/system/audio_policy.h b/audio/include/system/audio_policy.h
+index 9071f5b4..1554d438 100644
+--- a/audio/include/system/audio_policy.h
++++ b/audio/include/system/audio_policy.h
+@@ -50,6 +50,12 @@ typedef enum {
+     AUDIO_POLICY_FORCE_ENCODED_SURROUND_NEVER,
+     AUDIO_POLICY_FORCE_ENCODED_SURROUND_ALWAYS,
+     AUDIO_POLICY_FORCE_ENCODED_SURROUND_MANUAL,
++    /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++    /* Change-Id: Ic4905e878f8a1d8e3800cf97aa8f35da4be97d27 */
++    /* add for force spdif/arc audio out */
++    AUDIO_POLICY_FORCE_HDMI_ARC,
++    AUDIO_POLICY_FORCE_SPDIF,
++    /*[Amlogic end]-----------------------------------------------------------*/
+ 
+     AUDIO_POLICY_FORCE_CFG_CNT,
+     AUDIO_POLICY_FORCE_CFG_MAX = AUDIO_POLICY_FORCE_CFG_CNT - 1,
+-- 
+2.25.0
+

@@ -1,0 +1,357 @@
+From 95617ef2b3679c51a33e1b69182a99d2ce88b0ce Mon Sep 17 00:00:00 2001
+From: "hongchao.yin" <hongchao.yin@amlogic.com>
+Date: Tue, 2 Feb 2021 10:41:21 +0800
+Subject: [PATCH] TvAudio: Merge from P and Q to R autopatchs [1/1]
+
+PD#SWPL-35207
+
+Problem:
+[Android R] audio framework and app code merge from P and Q
+
+Solution:
+Merge from P and Q to R autopatchs
+
+Verify:
+U215
+
+Change-Id: I7c0e08f57ba75ce171cf2cdf989c153371d11484
+Signed-off-by: hongchao.yin <hongchao.yin@amlogic.com>
+---
+ services/audiopolicy/common/include/policy.h  | 20 +++++
+ .../include/AudioOutputDescriptor.h           | 12 +++
+ .../src/AudioOutputDescriptor.cpp             | 79 +++++++++++++++++++
+ .../audiopolicy/enginedefault/src/Engine.cpp  | 71 ++++++++++++++---
+ .../managerdefault/AudioPolicyManager.cpp     | 42 ++++++++++
+ 5 files changed, 215 insertions(+), 9 deletions(-)
+
+diff --git a/services/audiopolicy/common/include/policy.h b/services/audiopolicy/common/include/policy.h
+index 0537365ae2..3d1d22b9e0 100644
+--- a/services/audiopolicy/common/include/policy.h
++++ b/services/audiopolicy/common/include/policy.h
+@@ -220,6 +220,26 @@ static inline audio_devices_t apm_extract_one_audio_device(
+         // retain the device on the A2DP output as the other must not correspond to an active
+         // selection if not the speaker.
+         //  - HDMI-CEC system audio mode only output: give priority to available item in order.
++
++        /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++        /* Change-Id: Ic4905e878f8a1d8e3800cf97aa8f35da4be97d27 */
++        // The priority for A2DP > SCO > USB.
++        std::vector<audio_devices_t> a2dpDevices = android::Intersection(
++                deviceTypes, android::getAudioDeviceOutAllA2dpSet());
++        if (a2dpDevices.empty() == false) {
++            return a2dpDevices[0];
++        }
++        std::vector<audio_devices_t> scoDevices = android::Intersection(
++                deviceTypes, android::getAudioDeviceOutAllScoSet());
++        if (scoDevices.empty() == false) {
++            return scoDevices[0];
++        }
++        std::vector<audio_devices_t> usbDevices = android::Intersection(
++                deviceTypes, android::getAudioDeviceOutAllUsbSet());
++        if (usbDevices.empty() == false) {
++            return usbDevices[0];
++        }
++        /*[Amlogic end]----------------------------------------------------------*/
+         if (deviceTypes.count(AUDIO_DEVICE_OUT_SPEAKER) != 0) {
+             return AUDIO_DEVICE_OUT_SPEAKER;
+         } else if (deviceTypes.count(AUDIO_DEVICE_OUT_SPEAKER_SAFE) != 0) {
+diff --git a/services/audiopolicy/common/managerdefinitions/include/AudioOutputDescriptor.h b/services/audiopolicy/common/managerdefinitions/include/AudioOutputDescriptor.h
+index 39d11401be..6796d0c766 100644
+--- a/services/audiopolicy/common/managerdefinitions/include/AudioOutputDescriptor.h
++++ b/services/audiopolicy/common/managerdefinitions/include/AudioOutputDescriptor.h
+@@ -306,6 +306,12 @@ public:
+     DeviceVector mDevices; /**< current devices this output is routed to */
+     wp<AudioPolicyMix> mPolicyMix;  // non NULL when used by a dynamic policy
+ 
++    /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++    /* Change-Id: Ia4120848f02c700d9b03a48e0b7122415eb63799 */
++    virtual bool updateGain(
++        audio_devices_t device, float volumeDb, float minVolumeDb, float maxVolumeDb);
++    /*[Amlogic end]----------------------------------------------------------*/
++
+ protected:
+     const sp<PolicyAudioPort> mPolicyAudioPort;
+     AudioPolicyClientInterface * const mClientInterface;
+@@ -403,6 +409,12 @@ public:
+      */
+     DeviceVector filterSupportedDevices(const DeviceVector &devices) const;
+ 
++    /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++    /* Change-Id: Ia4120848f02c700d9b03a48e0b7122415eb63799 */
++    bool updateGain(
++          audio_devices_t device, float volumeDb, float minVolumeDb, float maxVolumeDb);
++    /*[Amlogic end]----------------------------------------------------------*/
++
+     const sp<IOProfile> mProfile;          // I/O profile this output derives from
+     audio_io_handle_t mIoHandle;           // output handle
+     uint32_t mLatency;                  //
+diff --git a/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp b/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp
+index d6d472b82e..152ac0c00f 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp
+@@ -274,6 +274,85 @@ void AudioOutputDescriptor::log(const char* indent)
+           indent, mId, mId, mSamplingRate, mFormat, mChannelMask);
+ }
+ 
++/*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++/* Change-Id: Ia4120848f02c700d9b03a48e0b7122415eb63799 */
++bool AudioOutputDescriptor::updateGain(audio_devices_t device __unused,
++                                       float volumeDb __unused,
++                                       float minVolumeDb __unused,
++                                       float maxVolumeDb __unused)
++{
++    return false;
++}
++
++bool SwAudioOutputDescriptor::updateGain(audio_devices_t device,
++                                         float volumeDb,
++                                         float minVolumeDb,
++                                         float maxVolumeDb)
++{
++    if (mProfile == 0) {
++        ALOGE("Error: this SwAudioOutputDescriptor doesn't have valid mProfile!");
++        return false;
++    }
++
++    DeviceVector supportedDevices = mProfile->getSupportedDevices().getDevicesFromType(device);
++    sp<DeviceDescriptor> deviceDesc = NULL;
++    sp<AudioPort> audioPort = NULL;
++    for (size_t i = 0; i < supportedDevices.size(); i ++) {
++        deviceDesc = supportedDevices.itemAt(i);
++        if (deviceDesc->type() == device) {
++            audioPort = deviceDesc->asAudioPort();
++            break;
++        }
++        deviceDesc = NULL;
++    }
++
++    if (deviceDesc == NULL || audioPort == NULL) {
++        ALOGE("Error: failed to get device descriptor or audio port!");
++        return false;
++    }
++    const AudioGains &audioGains = audioPort->getGains();
++    if (audioGains.empty()) {
++        ALOGE("Error: audio gain collection is empty for current port");
++        return false;
++    }
++
++    int gainMinValueInMb = audioGains[0]->getMinValueInMb();
++    int gainMaxValueInMb = audioGains[0]->getMaxValueInMb();
++    int gainStepValueInMb = audioGains[0]->getStepValueInMb();
++
++
++    int gainValue = ((int)((volumeDb - minVolumeDb) * (gainMaxValueInMb - gainMinValueInMb)))
++        / (int)(maxVolumeDb - minVolumeDb) + gainMinValueInMb;
++    gainValue = (int)(((float)gainValue / gainStepValueInMb) * gainStepValueInMb);
++
++    std::max(gainMinValueInMb, std::min(gainValue, gainMaxValueInMb));
++    ALOGV("[%s:%d] gainMinValueInMb:%d, gainMaxValueInMb:%d, gainStepValueInMb:%d, gainValue:%d", __func__, __LINE__,
++        gainMinValueInMb, gainMaxValueInMb, gainStepValueInMb, gainValue);
++    struct audio_port_config newConfig;
++    struct audio_port_config backupConfig;
++    deviceDesc->toAudioPortConfig(&newConfig);
++    newConfig.config_mask = AUDIO_PORT_CONFIG_GAIN;
++    newConfig.type = AUDIO_PORT_TYPE_DEVICE;
++    newConfig.gain.values[0] = gainValue;
++    newConfig.gain.index = 0;
++    newConfig.gain.mode = AUDIO_GAIN_MODE_JOINT;
++    newConfig.ext.device.type = device;
++    status_t status = deviceDesc->applyAudioPortConfig(&newConfig, &backupConfig);
++
++    if (status != NO_ERROR) {
++        ALOGE("Error to apply new config, status = %d", status);
++        return false;
++    }
++    status = mClientInterface->setAudioPortConfig(&newConfig, 0);
++    if (status != NO_ERROR) {
++        deviceDesc->applyAudioPortConfig(&backupConfig);
++        ALOGE("Error to setAudioPortConfig, status = %d", status);
++        return false;
++    }
++    return true;
++}
++/*[Amlogic end]-----------------------------------------------------------*/
++
+ // SwAudioOutputDescriptor implementation
+ SwAudioOutputDescriptor::SwAudioOutputDescriptor(const sp<IOProfile>& profile,
+                                                  AudioPolicyClientInterface *clientInterface)
+diff --git a/services/audiopolicy/enginedefault/src/Engine.cpp b/services/audiopolicy/enginedefault/src/Engine.cpp
+index b14d2bbb0b..0c1f9b5ec7 100755
+--- a/services/audiopolicy/enginedefault/src/Engine.cpp
++++ b/services/audiopolicy/enginedefault/src/Engine.cpp
+@@ -395,6 +395,17 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
+             (getForceUse(AUDIO_POLICY_FORCE_FOR_MEDIA) == AUDIO_POLICY_FORCE_SPEAKER)) {
+             devices2 = availableOutputDevices.getDevicesFromType(AUDIO_DEVICE_OUT_SPEAKER);
+         }
++        /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++        /* Change-Id: Ic4905e878f8a1d8e3800cf97aa8f35da4be97d27 */
++        if ((devices2.isEmpty()) &&
++            (getForceUse(AUDIO_POLICY_FORCE_FOR_MEDIA) == AUDIO_POLICY_FORCE_HDMI_ARC)) {
++            devices2 = availableOutputDevices.getDevicesFromType(AUDIO_DEVICE_OUT_HDMI_ARC);
++        }
++        if ((devices2.isEmpty()) &&
++            (getForceUse(AUDIO_POLICY_FORCE_FOR_MEDIA) == AUDIO_POLICY_FORCE_SPDIF)) {
++            devices2 = availableOutputDevices.getDevicesFromType(AUDIO_DEVICE_OUT_SPDIF);
++        }
++        /*[Amlogic end]----------------------------------------------------------*/
+         if (devices2.isEmpty() && (getLastRemovableMediaDevices().size() > 0)) {
+             if ((getForceUse(AUDIO_POLICY_FORCE_FOR_MEDIA) != AUDIO_POLICY_FORCE_NO_BT_A2DP) &&
+                     outputs.isA2dpSupported()) {
+@@ -431,12 +442,28 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
+         // STRATEGY_ENFORCED_AUDIBLE, AUDIO_DEVICE_NONE otherwise
+         devices.add(devices2);
+ 
++        /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++        /* Change-Id: Ic4905e878f8a1d8e3800cf97aa8f35da4be97d27 */
++        /*
+         // If hdmi system audio mode is on, remove speaker out of output list.
+         if ((strategy == STRATEGY_MEDIA) &&
+             (getForceUse(AUDIO_POLICY_FORCE_FOR_HDMI_SYSTEM_AUDIO) ==
+                 AUDIO_POLICY_FORCE_HDMI_SYSTEM_AUDIO_ENFORCED)) {
+             devices.remove(devices.getDevicesFromType(AUDIO_DEVICE_OUT_SPEAKER));
+         }
++        }*/
++        // ARC has a lower priority than A2DP, SCO, USB. Remove ARC when connected they.
++        std::vector<audio_devices_t> a2dpDevices = Intersection(
++                devices.types(), getAudioDeviceOutAllA2dpSet());
++        std::vector<audio_devices_t> scoDevices = Intersection(
++                devices.types(), getAudioDeviceOutAllScoSet());
++        std::vector<audio_devices_t> usbDevices = Intersection(
++                devices.types(), getAudioDeviceOutAllUsbSet());
++        bool hasBluetoothOrUsbDevices = !a2dpDevices.empty() || !scoDevices.empty() || !usbDevices.empty();
++        if ((strategy == STRATEGY_MEDIA) && hasBluetoothOrUsbDevices) {
++            devices.remove(devices.getDevicesFromType(AUDIO_DEVICE_OUT_HDMI_ARC));
++        }
++        /*[Amlogic end]----------------------------------------------------------*/
+ 
+         // for STRATEGY_SONIFICATION:
+         // if SPEAKER was selected, and SPEAKER_SAFE is available, use SPEAKER_SAFE instead
+@@ -515,7 +542,11 @@ sp<DeviceDescriptor> Engine::getDeviceForInputSource(audio_source_t inputSource)
+         }
+         device = availableDevices.getFirstExistingDevice({
+                 AUDIO_DEVICE_IN_WIRED_HEADSET, AUDIO_DEVICE_IN_USB_HEADSET,
+-                AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_BUILTIN_MIC});
++                /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++                /* Change-Id: If40b3570059ef2df207e9116889fe9f1d8ce39ab */
++                AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_BLUETOOTH_BLE,
++                AUDIO_DEVICE_IN_BUILTIN_MIC});
++                /*[Amlogic end]----------------------------------------------------------*/
+         break;
+ 
+     case AUDIO_SOURCE_VOICE_COMMUNICATION:
+@@ -541,7 +572,11 @@ sp<DeviceDescriptor> Engine::getDeviceForInputSource(audio_source_t inputSource)
+         default:    // FORCE_NONE
+             device = availableDevices.getFirstExistingDevice({
+                     AUDIO_DEVICE_IN_WIRED_HEADSET, AUDIO_DEVICE_IN_USB_HEADSET,
+-                    AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_BUILTIN_MIC});
++                    /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++                    /* Change-Id: If40b3570059ef2df207e9116889fe9f1d8ce39ab */
++                    AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_BLUETOOTH_BLE,
++                    AUDIO_DEVICE_IN_BUILTIN_MIC});
++                    /*[Amlogic end]----------------------------------------------------------*/
+             break;
+ 
+         case AUDIO_POLICY_FORCE_SPEAKER:
+@@ -553,13 +588,27 @@ sp<DeviceDescriptor> Engine::getDeviceForInputSource(audio_source_t inputSource)
+ 
+     case AUDIO_SOURCE_VOICE_RECOGNITION:
+     case AUDIO_SOURCE_UNPROCESSED:
+-    case AUDIO_SOURCE_HOTWORD:
+-        if (inputSource == AUDIO_SOURCE_HOTWORD) {
+-            // We should not use primary output criteria for Hotword but rather limit
+-            // to devices attached to the same HW module as the build in mic
+-            LOG_ALWAYS_FATAL_IF(availablePrimaryDevices.isEmpty(), "Primary devices not found");
+-            availableDevices = availablePrimaryDevices;
++        /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++        /* Change-Id: If40b3570059ef2df207e9116889fe9f1d8ce39ab */
++        if (getForceUse(AUDIO_POLICY_FORCE_FOR_RECORD) == AUDIO_POLICY_FORCE_BT_SCO) {
++            device = availableDevices.getDevice(
++                    AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET, String8(""), AUDIO_FORMAT_DEFAULT);
++            if (device != nullptr) break;
+         }
++        // we need to make BLUETOOTH_BLE has higher priority than BUILTIN_MIC,
++        // because sometimes user want to do voice search by bt remote
++        // even if BUILDIN_MIC is available.
++        device = availableDevices.getFirstExistingDevice({
++                AUDIO_DEVICE_IN_WIRED_HEADSET, AUDIO_DEVICE_IN_USB_HEADSET,
++                AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_BLUETOOTH_BLE,
++                AUDIO_DEVICE_IN_BUILTIN_MIC});
++        break;
++    case AUDIO_SOURCE_HOTWORD:
++        // We should not use primary output criteria for Hotword but rather limit
++        // to devices attached to the same HW module as the build in mic
++        LOG_ALWAYS_FATAL_IF(availablePrimaryDevices.isEmpty(), "Primary devices not found");
++        availableDevices = availablePrimaryDevices;
++        /*[Amlogic end]----------------------------------------------------------*/
+         if (getForceUse(AUDIO_POLICY_FORCE_FOR_RECORD) == AUDIO_POLICY_FORCE_BT_SCO) {
+             device = availableDevices.getDevice(
+                     AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET, String8(""), AUDIO_FORMAT_DEFAULT);
+@@ -584,7 +633,11 @@ sp<DeviceDescriptor> Engine::getDeviceForInputSource(audio_source_t inputSource)
+     case AUDIO_SOURCE_VOICE_PERFORMANCE:
+         device = availableDevices.getFirstExistingDevice({
+                 AUDIO_DEVICE_IN_WIRED_HEADSET, AUDIO_DEVICE_IN_USB_HEADSET,
+-                AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_BUILTIN_MIC});
++                /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++                /* Change-Id: If40b3570059ef2df207e9116889fe9f1d8ce39ab */
++                AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_BLUETOOTH_BLE,
++                AUDIO_DEVICE_IN_BUILTIN_MIC});
++                /*[Amlogic end]----------------------------------------------------------*/
+         break;
+     case AUDIO_SOURCE_REMOTE_SUBMIX:
+         device = availableDevices.getDevice(
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 07e80d11c9..748546b1a9 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -6153,6 +6153,48 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
+                     isSingleDeviceType(deviceTypes, audio_is_bluetooth_out_sco_device))) {
+         volumeDb = 0.0f;
+     }
++    /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++    /* Change-Id: Ia4120848f02c700d9b03a48e0b7122415eb63799 */
++    /* Need adjust audio hal volume when television platform. */
++    if (property_get_bool("ro.vendor.platform.is.tv", false /* default_value */)) {
++        DeviceTypeSet   curSrcDevicesVector = deviceTypesFromBitMask(getDevicesForStream(AUDIO_STREAM_MUSIC));
++        audio_devices_t curDevice = Volume::getDeviceForVolume(curSrcDevicesVector);
++        DeviceTypeSet   curDeviceVector = deviceTypesFromBitMask(curDevice);
++        bool            speakerGainApplied = false;
++        bool            bootVideoRunning = property_get_int32("service.bootvideo.exit", 0) == 1;
++
++        if (curDevice == AUDIO_DEVICE_OUT_SPEAKER &&
++            (outputDesc->isStrategyActive(streamToStrategy(AUDIO_STREAM_MUSIC)) || bootVideoRunning)) {
++            //ignoring the "index" passed as argument and always use MUSIC stream index
++            //for all stream types works on TV because all stream types are aliases of MUSIC.
++            device_category devCategory = Volume::getDeviceCategory(curDeviceVector);
++
++            auto &volCurves = getVolumeCurves(AUDIO_STREAM_MUSIC);
++            int volumeIndex = volCurves.getVolumeIndex(curDeviceVector);
++            int volumeMaxIndex = volCurves.getVolumeIndexMax();
++            int volumeMinIndex = volCurves.getVolumeIndexMin();
++
++            float musicVolumeDb = volCurves.volIndexToDb(devCategory, volumeIndex);
++            float maxMusicVolumeDb = volCurves.volIndexToDb(devCategory, volumeMaxIndex);
++            float minMusicVolumeDb = volCurves.volIndexToDb(devCategory, volumeMinIndex);
++            ALOGV("[%s:%d] volumeIndex:%d, volumeMinIndex:%d, volumeMaxIndex:%d, curDevice:%#x, devCategory:%d",
++                __func__, __LINE__, volumeIndex, volumeMinIndex, volumeMaxIndex, curDevice, devCategory);
++            ALOGV("[%s:%d] musicVolumeDb:%f, minMusicVolumeDb:%f, maxMusicVolumeDb:%f, bootVideoRunning:%d",
++                __func__, __LINE__, musicVolumeDb, minMusicVolumeDb, maxMusicVolumeDb, bootVideoRunning);
++            if (bootVideoRunning) {
++                maxMusicVolumeDb = 0.0f;
++                minMusicVolumeDb = -10000.0f;
++                musicVolumeDb = -1837.0f;
++            }
++            speakerGainApplied = outputDesc->updateGain(curDevice,
++                                        musicVolumeDb, minMusicVolumeDb, maxMusicVolumeDb);
++        }
++        if (curDevice == AUDIO_DEVICE_OUT_HDMI_ARC || curDevice == AUDIO_DEVICE_OUT_WIRED_HEADPHONE ||
++            (speakerGainApplied && (curDevice & AUDIO_DEVICE_OUT_SPEAKER) != 0)) {
++            volumeDb = 0.0f;
++        }
++    }
++    /*[Amlogic end]-----------------------------------------------------------*/
+     outputDesc->setVolume(
+             volumeDb, volumeSource, curves.getStreamTypes(), deviceTypes, delayMs, force);
+ 
+-- 
+2.29.0
+
