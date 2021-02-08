@@ -1,5 +1,5 @@
-From 1ede50a6f374de97c78c97bb0b3d18eeae7cfa86 Mon Sep 17 00:00:00 2001
-From: shilong.yang <shilong.yang@amlogic.com>
+From b53da898b461f6af54ec903ddc2fcf8342154839 Mon Sep 17 00:00:00 2001
+From: "shilong.yang" <shilong.yang@amlogic.com>
 Date: Fri, 13 Nov 2020 14:33:15 +0800
 Subject: [PATCH] frameworks: add codec ext and load amnuplayer for R. [1/1]
 
@@ -17,12 +17,27 @@ ohm
 Change-Id: Ibdf5739bcc85e3df8e69c4b8cf903dfac454cd78
 Signed-off-by: shilong.yang <shilong.yang@amlogic.com>
 ---
+ media/extractors/tests/Android.bp             |   2 +
+ .../MetadataRetrieverClient.cpp               |  35 +++++
+ media/libstagefright/ACodec.cpp               |  27 +++-
+ media/libstagefright/Android.bp               |   3 +
+ media/libstagefright/Utils.cpp                |   9 ++
+ media/libstagefright/rtsp/Android.bp          |   1 +
+ .../tests/extractorFactory/Android.bp         |   3 +
+ media/libstagefright/tests/writer/Android.bp  |   3 +
+ media/libstagefright/webm/tests/Android.bp    |   3 +
+ media/libstagefright/xmlparser/Android.bp     |  23 +++
+ .../xmlparser/MediaCodecsXmlParser.cpp        | 132 +++++++++++++++++-
+ media/libstagefright/xmlparser/XmlParser.go   |  41 ++++++
+ media/mediaserver/Android.bp                  |   2 +-
+ 13 files changed, 277 insertions(+), 7 deletions(-)
+ create mode 100755 media/libstagefright/xmlparser/XmlParser.go
 
 diff --git a/media/extractors/tests/Android.bp b/media/extractors/tests/Android.bp
-index b3afe2f..69e8bdd 100644
+index b3afe2f3ca..69e8bddc6b 100644
 --- a/media/extractors/tests/Android.bp
 +++ b/media/extractors/tests/Android.bp
-@@ -49,6 +49,7 @@
+@@ -49,6 +49,7 @@ cc_test {
          "libvorbisidec",
          "libwebm",
          "libFLAC",
@@ -30,7 +45,7 @@ index b3afe2f..69e8bdd 100644
      ],
  
      shared_libs: [
-@@ -67,6 +68,7 @@
+@@ -67,6 +68,7 @@ cc_test {
          "libhidlmemory",
          "libhidlbase",
          "libbase",
@@ -39,7 +54,7 @@ index b3afe2f..69e8bdd 100644
  
      include_dirs: [
 diff --git a/media/libmediaplayerservice/MetadataRetrieverClient.cpp b/media/libmediaplayerservice/MetadataRetrieverClient.cpp
-index fb228ca..5552bf6 100644
+index fb228ca297..5552bf6552 100644
 --- a/media/libmediaplayerservice/MetadataRetrieverClient.cpp
 +++ b/media/libmediaplayerservice/MetadataRetrieverClient.cpp
 @@ -42,6 +42,7 @@
@@ -50,7 +65,7 @@ index fb228ca..5552bf6 100644
  
  namespace android {
  
-@@ -81,9 +82,43 @@
+@@ -81,9 +82,43 @@ void MetadataRetrieverClient::disconnect()
      IPCThreadState::self()->flushCommands();
  }
  
@@ -95,7 +110,7 @@ index fb228ca..5552bf6 100644
          case STAGEFRIGHT_PLAYER:
          case NU_PLAYER:
 diff --git a/media/libstagefright/ACodec.cpp b/media/libstagefright/ACodec.cpp
-index ebc98ae..beb63fa 100644
+index ebc98ae760..beb63fae72 100644
 --- a/media/libstagefright/ACodec.cpp
 +++ b/media/libstagefright/ACodec.cpp
 @@ -63,6 +63,8 @@
@@ -107,7 +122,7 @@ index ebc98ae..beb63fa 100644
  
  namespace android {
  
-@@ -575,7 +577,7 @@
+@@ -575,7 +577,7 @@ ACodec::ACodec()
        mDescribeHDR10PlusInfoIndex((OMX_INDEXTYPE)0),
        mStateGeneration(0),
        mVendorExtensionsStatus(kExtensionsUnchecked) {
@@ -116,7 +131,7 @@ index ebc98ae..beb63fa 100644
  
      mUninitializedState = new UninitializedState(this);
      mLoadedState = new LoadedState(this);
-@@ -1691,7 +1693,7 @@
+@@ -1691,7 +1693,7 @@ status_t ACodec::fillBuffer(BufferInfo *info) {
  
  status_t ACodec::setComponentRole(
          bool isEncoder, const char *mime) {
@@ -125,7 +140,7 @@ index ebc98ae..beb63fa 100644
      if (role == NULL) {
          return BAD_VALUE;
      }
-@@ -2067,7 +2069,7 @@
+@@ -2067,7 +2069,7 @@ status_t ACodec::configureCodec(
                  requiresSwRenderer = true;
              }
  
@@ -134,7 +149,7 @@ index ebc98ae..beb63fa 100644
                  usingSwRenderer = true;
                  haveNativeWindow = false;
                  (void)setPortMode(kPortIndexOutput, IOMX::kPortModePresetByteBuffer);
-@@ -2304,6 +2306,11 @@
+@@ -2304,6 +2306,11 @@ status_t ACodec::configureCodec(
              err = setupAC4Codec(encoder, numChannels, sampleRate);
          }
      }
@@ -146,7 +161,7 @@ index ebc98ae..beb63fa 100644
  
      if (err != OK) {
          return err;
-@@ -3453,9 +3460,12 @@
+@@ -3453,9 +3460,12 @@ status_t ACodec::setupVideoDecoder(
      status_t err = GetVideoCodingTypeFromMime(mime, &compressionFormat);
  
      if (err != OK) {
@@ -160,7 +175,7 @@ index ebc98ae..beb63fa 100644
      if (compressionFormat == OMX_VIDEO_CodingHEVC) {
          int32_t profile;
          if (msg->findInt32("profile", &profile)) {
-@@ -5504,6 +5514,13 @@
+@@ -5504,6 +5514,13 @@ status_t ACodec::getPortFormat(OMX_U32 portIndex, sp<AMessage> &notify) {
                  }
  
                  default:
@@ -174,7 +189,7 @@ index ebc98ae..beb63fa 100644
                      ALOGE("Unsupported audio coding: %s(%d)\n",
                              asString(audioDef->eEncoding), audioDef->eEncoding);
                      return BAD_TYPE;
-@@ -8718,7 +8735,7 @@
+@@ -8718,7 +8735,7 @@ void ACodec::FlushingState::changeStateIfWeOwnAllBuffers() {
  status_t ACodec::queryCapabilities(
          const char* owner, const char* name, const char* mime, bool isEncoder,
          MediaCodecInfo::CapabilitiesWriter* caps) {
@@ -184,10 +199,10 @@ index ebc98ae..beb63fa 100644
          return BAD_VALUE;
      }
 diff --git a/media/libstagefright/Android.bp b/media/libstagefright/Android.bp
-index 3bccb7b..567cbb2 100644
+index 3bccb7be7a..567cbb20f3 100644
 --- a/media/libstagefright/Android.bp
 +++ b/media/libstagefright/Android.bp
-@@ -141,6 +141,7 @@
+@@ -141,6 +141,7 @@ cc_library_static {
          "-Werror",
          "-Wno-error=deprecated-declarations",
          "-Wall",
@@ -195,7 +210,7 @@ index 3bccb7b..567cbb2 100644
      ],
  
      sanitize: {
-@@ -285,6 +286,7 @@
+@@ -285,6 +286,7 @@ cc_library {
          "android.hardware.cas.native@1.0",
          "android.hardware.drm@1.0",
          "android.hardware.media.omx@1.0",
@@ -203,7 +218,7 @@ index 3bccb7b..567cbb2 100644
      ],
  
      static_libs: [
-@@ -297,6 +299,7 @@
+@@ -297,6 +299,7 @@ cc_library {
          "libogg",
          "libwebm",
          "libstagefright_id3",
@@ -212,7 +227,7 @@ index 3bccb7b..567cbb2 100644
  
      header_libs:[
 diff --git a/media/libstagefright/Utils.cpp b/media/libstagefright/Utils.cpp
-index a1e4d43..0ae6f94 100644
+index a1e4d438ec..0ae6f94c3d 100644
 --- a/media/libstagefright/Utils.cpp
 +++ b/media/libstagefright/Utils.cpp
 @@ -46,6 +46,9 @@
@@ -225,7 +240,7 @@ index a1e4d43..0ae6f94 100644
  
  namespace android {
  
-@@ -1473,6 +1476,9 @@
+@@ -1473,6 +1476,9 @@ status_t convertMetaDataToMessage(
          ALOGV("DV: calling parseDolbyVisionProfileLevelFromDvcc with data size %zu", size);
          parseDolbyVisionProfileLevelFromDvcc(ptr, size, msg);
      }
@@ -235,7 +250,7 @@ index a1e4d43..0ae6f94 100644
  
      *format = msg;
  
-@@ -1986,6 +1992,9 @@
+@@ -1986,6 +1992,9 @@ void convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
          }
      }
      // XXX TODO add whatever other keys there are
@@ -246,10 +261,10 @@ index a1e4d43..0ae6f94 100644
  #if 0
      ALOGI("converted %s to:", msg->debugString(0).c_str());
 diff --git a/media/libstagefright/rtsp/Android.bp b/media/libstagefright/rtsp/Android.bp
-index a5a895e..3e07864 100644
+index a5a895e472..3e078645ed 100644
 --- a/media/libstagefright/rtsp/Android.bp
 +++ b/media/libstagefright/rtsp/Android.bp
-@@ -28,6 +28,7 @@
+@@ -28,6 +28,7 @@ cc_defaults {
      include_dirs: [
          "frameworks/av/media/libstagefright",
          "frameworks/native/include/media/openmax",
@@ -258,10 +273,10 @@ index a5a895e..3e07864 100644
  
      arch: {
 diff --git a/media/libstagefright/tests/extractorFactory/Android.bp b/media/libstagefright/tests/extractorFactory/Android.bp
-index e3e61d7..0686b93 100644
+index e3e61d7753..0686b93975 100644
 --- a/media/libstagefright/tests/extractorFactory/Android.bp
 +++ b/media/libstagefright/tests/extractorFactory/Android.bp
-@@ -32,11 +32,14 @@
+@@ -32,11 +32,14 @@ cc_test {
          "libdl_android",
          "libdatasource",
          "libmediametrics",
@@ -277,10 +292,10 @@ index e3e61d7..0686b93 100644
  
      include_dirs: [
 diff --git a/media/libstagefright/tests/writer/Android.bp b/media/libstagefright/tests/writer/Android.bp
-index 7e169cb..be23b17 100644
+index 7e169cbffa..be23b17887 100644
 --- a/media/libstagefright/tests/writer/Android.bp
 +++ b/media/libstagefright/tests/writer/Android.bp
-@@ -28,6 +28,8 @@
+@@ -28,6 +28,8 @@ cc_test {
          "libcutils",
          "liblog",
          "libutils",
@@ -289,7 +304,7 @@ index 7e169cb..be23b17 100644
      ],
  
      static_libs: [
-@@ -37,6 +39,7 @@
+@@ -37,6 +39,7 @@ cc_test {
          "libstagefright_foundation",
          "libstagefright_esds",
          "libogg",
@@ -298,10 +313,10 @@ index 7e169cb..be23b17 100644
  
      include_dirs: [
 diff --git a/media/libstagefright/webm/tests/Android.bp b/media/libstagefright/webm/tests/Android.bp
-index 5183a49..8cd9090 100644
+index 5183a49495..8cd9090315 100644
 --- a/media/libstagefright/webm/tests/Android.bp
 +++ b/media/libstagefright/webm/tests/Android.bp
-@@ -31,12 +31,15 @@
+@@ -31,12 +31,15 @@ cc_test {
          "libstagefright",
          "libstagefright_webm",
          "libstagefright_foundation",
@@ -317,15 +332,53 @@ index 5183a49..8cd9090 100644
      ],
  
      cflags: [
+diff --git a/media/libstagefright/xmlparser/Android.bp b/media/libstagefright/xmlparser/Android.bp
+index 7ed0e88d15..46b7785383 100644
+--- a/media/libstagefright/xmlparser/Android.bp
++++ b/media/libstagefright/xmlparser/Android.bp
+@@ -1,3 +1,25 @@
++bootstrap_go_package {
++    name: "xmlparser",
++    pkgPath: "android/soong/xmlparser",
++    deps: [
++        "blueprint",
++        "blueprint-pathtools",
++        "soong",
++        "soong-android",
++        "soong-cc",
++        "soong-genrule",
++    ],
++    srcs: [
++        "XmlParser.go",
++    ],
++    pluginFor: ["soong_build"],
++}
++
++xmlparser_defaults {
++    name: "xmlparser_defaults",
++}
++
++
+ cc_library_headers {
+     name: "libstagefright_xmlparser_headers",
+     export_include_dirs: ["include"],
+@@ -6,6 +28,7 @@ cc_library_headers {
+ 
+ cc_library_shared {
+     name: "libstagefright_xmlparser",
++    defaults: ["xmlparser_defaults"],
+     vendor_available: true,
+     vndk: {
+         enabled: true,
 diff --git a/media/libstagefright/xmlparser/MediaCodecsXmlParser.cpp b/media/libstagefright/xmlparser/MediaCodecsXmlParser.cpp
-index a232150..73c81dc 100644
+index a232150402..1341db74a9 100644
 --- a/media/libstagefright/xmlparser/MediaCodecsXmlParser.cpp
 +++ b/media/libstagefright/xmlparser/MediaCodecsXmlParser.cpp
-@@ -138,15 +138,18 @@
+@@ -138,15 +138,18 @@ MediaCodecsXmlParser::StringSet parseCommaSeparatedStringSet(const char *s) {
  std::vector<std::string> MediaCodecsXmlParser::getDefaultXmlNames() {
      static constexpr char const* prefixes[] = {
              "media_codecs",
-+            "media_codecs_ext.xml",
++            "media_codecs_ext",
              "media_codecs_performance"
          };
      static std::vector<std::string> variants = {
@@ -341,7 +394,7 @@ index a232150..73c81dc 100644
          };
      return names;
  }
-@@ -425,6 +428,8 @@
+@@ -425,6 +428,8 @@ status_t MediaCodecsXmlParser::Impl::parseXmlFilesInSearchDirs(
      for (const std::string fileName : fileNames) {
          status_t err = NO_INIT;
          std::string path;
@@ -350,7 +403,7 @@ index a232150..73c81dc 100644
          if (findFileInDirs(searchDirs, fileName, &path)) {
              err = parseXmlPath(path);
          } else {
-@@ -1457,6 +1462,127 @@
+@@ -1457,6 +1462,127 @@ status_t MediaCodecsXmlParser::getParsingStatus() const {
      return mImpl->getParsingStatus();
  }
  
@@ -478,20 +531,70 @@ index a232150..73c81dc 100644
  void MediaCodecsXmlParser::Impl::generateRoleMap() const {
      for (const auto& codec : mData.mCodecMap) {
          const auto &codecName = codec.first;
-@@ -1469,7 +1595,7 @@
+@@ -1469,7 +1595,11 @@ void MediaCodecsXmlParser::Impl::generateRoleMap() const {
          const auto& typeMap = codec.second.typeMap;
          for (const auto& type : typeMap) {
              const auto& typeName = type.first;
--            const char* roleName = GetComponentRole(isEncoder, typeName.data());
++        #ifdef TARGETSWCODEC_EXT
 +            const char* roleName = AGetComponentRole(isEncoder, typeName.data());
++        #else
+             const char* roleName = GetComponentRole(isEncoder, typeName.data());
++        #endif
              if (roleName == nullptr) {
                  ALOGE("Cannot find the role for %s of type %s",
                          isEncoder ? "an encoder" : "a decoder",
+diff --git a/media/libstagefright/xmlparser/XmlParser.go b/media/libstagefright/xmlparser/XmlParser.go
+new file mode 100755
+index 0000000000..26487b7798
+--- /dev/null
++++ b/media/libstagefright/xmlparser/XmlParser.go
+@@ -0,0 +1,41 @@
++package xmlparser
++
++import (
++    "android/soong/android"
++    "android/soong/cc"
++    "fmt"
++)
++
++func xmlparserDefaults (ctx android.LoadHookContext) {
++    sdkVersion := ctx.AConfig().PlatformSdkVersionInt()
++    fmt.Println("sdkVersion:", sdkVersion)
++    if sdkVersion >= 30{
++        type props struct {
++        Cflags []string
++        }
++        p := &props{}
++        p.Cflags = globalDefaults(ctx)
++        ctx.AppendProperties(p)
++    }
++}
++
++func globalDefaults(ctx android.BaseContext) ([]string) {
++    var cppflags []string
++    vconfig := ctx.Config().VendorConfig("amlogic_vendorconfig")
++    if vconfig.Bool("enable_swcodec") == true {
++        fmt.Println("stagefright: enable_swcodec is true")
++        cppflags = append(cppflags,"-DTARGETSWCODEC_EXT")
++    }
++    return cppflags
++}
++
++func init () {
++    android.RegisterModuleType("xmlparser_defaults", xmlparserDefaultsFactory)
++}
++
++func xmlparserDefaultsFactory () android.Module {
++    module := cc.DefaultsFactory()
++    android.AddLoadHook(module, xmlparserDefaults)
++    return module
++}
++
 diff --git a/media/mediaserver/Android.bp b/media/mediaserver/Android.bp
-index afca7c4..5d2aafb 100644
+index afca7c4f71..5d2aafb65b 100644
 --- a/media/mediaserver/Android.bp
 +++ b/media/mediaserver/Android.bp
-@@ -26,7 +26,7 @@
+@@ -26,7 +26,7 @@ cc_binary {
      ],
  
      static_libs: [
@@ -500,3 +603,6 @@ index afca7c4..5d2aafb 100644
      ],
  
      include_dirs: [
+-- 
+2.28.0
+
