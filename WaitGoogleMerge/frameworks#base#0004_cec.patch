@@ -1,4 +1,4 @@
-From 3b4ea2850bca474b5f1546c1e8b7e8a8ba128c02 Mon Sep 17 00:00:00 2001
+From 25713d96fb3f8ff926cb0716d088d0efd4fc35c8 Mon Sep 17 00:00:00 2001
 From: "an.xi" <an.xi@amlogic.com>
 Date: Tue, 26 Jan 2021 04:08:57 -0500
 Subject: [PATCH] cec: some optimization and bugfix [1/1]
@@ -74,6 +74,7 @@ Signed-off-by: an.xi <an.xi@amlogic.com>
  mode change 100644 => 100755 services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceAudioSystem.java
  mode change 100644 => 100755 services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
  mode change 100644 => 100755 services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceSource.java
+ mode change 100644 => 100755 services/core/java/com/android/server/hdmi/HdmiControlService.java
 
 diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
 old mode 100755
@@ -1797,7 +1798,9 @@ index 3f949bab8a2e..79bf0f89b0f0 100644
       * Build &lt;Set Menu Language &gt; command.
       *
 diff --git a/services/core/java/com/android/server/hdmi/HdmiControlService.java b/services/core/java/com/android/server/hdmi/HdmiControlService.java
-index 87a908c10721..9f281f6facad 100644
+old mode 100644
+new mode 100755
+index 87a908c10721..85d9ec785de5
 --- a/services/core/java/com/android/server/hdmi/HdmiControlService.java
 +++ b/services/core/java/com/android/server/hdmi/HdmiControlService.java
 @@ -73,6 +73,7 @@ import android.provider.Settings.Global;
@@ -2035,9 +2038,9 @@ index 87a908c10721..9f281f6facad 100644
                          return;
                      }
                      HdmiCecLocalDeviceTv tv = tv();
-                     if (tv == null) {
--                        if (!mAddressAllocated) {
-+                        if (!mAddressAllocated || !tv.isDeviceDiscoveryFinished()) {
+-                    if (tv == null) {
++                    if (tv == null || !tv.isDeviceDiscoveryFinished()) {
+                         if (!mAddressAllocated) {
 +                            HdmiLogger.debug("set device select buffer " + deviceId);
                              mSelectRequestBuffer.set(SelectRequestBuffer.newDeviceSelect(
                                      HdmiControlService.this, deviceId, callback));
