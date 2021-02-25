@@ -1,0 +1,38 @@
+From 4c5804da455a841154071e6d1976043872af3a12 Mon Sep 17 00:00:00 2001
+From: Gongwei Chen <gongwei.chen@amlogic.com>
+Date: Thu, 25 Feb 2021 13:36:14 +0800
+Subject: [PATCH] Framework: Add function of right button of mouse. [1/1]
+
+PD#SWPL-43747
+
+Problem:
+No function of right button of mouse.
+
+Solution:
+Add function of right button of mouse.
+
+Verify:
+verify by ohm
+
+Change-Id: Ie0943cf963c75a197ac105832326c34067a2aa29
+Signed-off-by: Gongwei Chen <gongwei.chen@amlogic.com>
+---
+ .../reader/mapper/accumulator/CursorButtonAccumulator.cpp       | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/inputflinger/reader/mapper/accumulator/CursorButtonAccumulator.cpp b/services/inputflinger/reader/mapper/accumulator/CursorButtonAccumulator.cpp
+index 2d7d73b4a3..0fdccf9970 100644
+--- a/services/inputflinger/reader/mapper/accumulator/CursorButtonAccumulator.cpp
++++ b/services/inputflinger/reader/mapper/accumulator/CursorButtonAccumulator.cpp
+@@ -84,7 +84,7 @@ uint32_t CursorButtonAccumulator::getButtonState() const {
+         result |= AMOTION_EVENT_BUTTON_PRIMARY;
+     }
+     if (mBtnRight) {
+-        result |= AMOTION_EVENT_BUTTON_SECONDARY;
++        result |= AMOTION_EVENT_BUTTON_BACK;
+     }
+     if (mBtnMiddle) {
+         result |= AMOTION_EVENT_BUTTON_TERTIARY;
+-- 
+2.29.0
+
