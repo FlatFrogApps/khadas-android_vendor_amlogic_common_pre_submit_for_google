@@ -1,4 +1,4 @@
-From 25713d96fb3f8ff926cb0716d088d0efd4fc35c8 Mon Sep 17 00:00:00 2001
+From 9d12119ca88652ab312de72c9f41cd3ea105a908 Mon Sep 17 00:00:00 2001
 From: "an.xi" <an.xi@amlogic.com>
 Date: Tue, 26 Jan 2021 04:08:57 -0500
 Subject: [PATCH] cec: some optimization and bugfix [1/1]
@@ -61,12 +61,12 @@ Signed-off-by: an.xi <an.xi@amlogic.com>
  .../hdmi/RequestArcTerminationAction.java     |  10 +
  .../server/hdmi/RoutingControlAction.java     | 131 +++++--------
  .../server/hdmi/SelectRequestBuffer.java      |   5 +-
- .../android/server/hdmi/SendKeyAction.java    |  86 +++++----
+ .../android/server/hdmi/SendKeyAction.java    |   1 -
  .../hdmi/SetArcTransmissionStateAction.java   |   2 +-
  .../server/hdmi/SystemAudioAction.java        |   3 +-
  .../server/hdmi/SystemAudioActionFromTv.java  |   1 +
  .../hdmi/SystemAudioAutoInitiationAction.java |   9 +-
- 28 files changed, 873 insertions(+), 425 deletions(-)
+ 28 files changed, 829 insertions(+), 384 deletions(-)
  mode change 100755 => 100644 core/java/android/provider/Settings.java
  mode change 100755 => 100644 services/core/java/com/android/server/hdmi/DeviceDiscoveryAction.java
  create mode 100644 services/core/java/com/android/server/hdmi/HdmiCecActiveness.java
@@ -75,6 +75,7 @@ Signed-off-by: an.xi <an.xi@amlogic.com>
  mode change 100644 => 100755 services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
  mode change 100644 => 100755 services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceSource.java
  mode change 100644 => 100755 services/core/java/com/android/server/hdmi/HdmiControlService.java
+ mode change 100644 => 100755 services/core/java/com/android/server/hdmi/SendKeyAction.java
 
 diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
 old mode 100755
@@ -2692,154 +2693,19 @@ index ba16260bbfb7..ab6be9568606 100644
      }
  }
 diff --git a/services/core/java/com/android/server/hdmi/SendKeyAction.java b/services/core/java/com/android/server/hdmi/SendKeyAction.java
-index 5ad7fab888fd..858162a25b9c 100644
+old mode 100644
+new mode 100755
+index 5ad7fab888fd..1c4b8d1015d4
 --- a/services/core/java/com/android/server/hdmi/SendKeyAction.java
 +++ b/services/core/java/com/android/server/hdmi/SendKeyAction.java
-@@ -67,6 +67,10 @@ final class SendKeyAction extends HdmiCecFeatureAction {
-     // operation.
-     private long mLastSendKeyTime;
- 
-+    private boolean mFinishLastKeyEvent = true;
-+
-+    private boolean mSkipLastKeyEvent;
-+
-     /**
-      * Constructor.
-      *
-@@ -82,16 +86,8 @@ final class SendKeyAction extends HdmiCecFeatureAction {
- 
-     @Override
-     public boolean start() {
-+        mState = STATE_PROCESSING_KEYCODE;
-         sendKeyDown(mLastKeycode);
--        mLastSendKeyTime = getCurrentTime();
--        // finish action for non-repeatable key.
--        if (!HdmiCecKeycode.isRepeatableKey(mLastKeycode)) {
--            sendKeyUp();
--            finish();
--            return true;
--        }
--        mState = STATE_CHECKING_LONGPRESS;
--        addTimer(mState, AWAIT_LONGPRESS_MS);
-         return true;
-     }
- 
-@@ -110,35 +106,30 @@ final class SendKeyAction extends HdmiCecFeatureAction {
-             Slog.w(TAG, "Not in a valid state");
-             return;
-         }
-+
-         if (isPressed) {
-+            mSkipLastKeyEvent = false;
-             // A new key press event that comes in with a key code different from the last
-             // one becomes a new key code to be used for press-and-hold operation.
-             if (keycode != mLastKeycode) {
-                 sendKeyDown(keycode);
--                mLastSendKeyTime = getCurrentTime();
--                if (!HdmiCecKeycode.isRepeatableKey(keycode)) {
--                    sendKeyUp();
--                    finish();
--                    return;
--                }
-             } else {
-+                HdmiLogger.debug("processKeyEvent " + keycode + " mFinishLastKeyEvent " + mFinishLastKeyEvent + this);
-                 // Press-and-hold key transmission takes place if Android key inputs are
-                 // repeatedly coming in and more than IRT_MS has passed since the last
-                 // press-and-hold key transmission.
--                if (getCurrentTime() - mLastSendKeyTime >= IRT_MS) {
-+                if (mFinishLastKeyEvent && (getCurrentTime() - mLastSendKeyTime >= IRT_MS)) {
-+                    mFinishLastKeyEvent = false;
-                     sendKeyDown(keycode);
--                    mLastSendKeyTime = getCurrentTime();
-+                } else {
-+                    mSkipLastKeyEvent = true;
-                 }
-             }
--            mActionTimer.clearTimerMessage();
--            addTimer(mState, AWAIT_RELEASE_KEY_MS);
--            mLastKeycode = keycode;
-         } else {
-             // Key release event indicates that the action shall be finished. Send UCR
-             // command and terminate the action. Other release events are ignored.
--            if (keycode == mLastKeycode) {
-+            if (!mSkipLastKeyEvent) {
-                 sendKeyUp();
--                finish();
-             }
-         }
-     }
-@@ -148,31 +139,44 @@ final class SendKeyAction extends HdmiCecFeatureAction {
-         if (cecKeycodeAndParams == null) {
-             return;
-         }
--        // Devices that are not directly connected with audio system device can't detect if the
--        // audio system device is still plugged in. Framework checks if the volume key forwarding is
--        // successful or not every time to make sure the System Audio Mode status is still updated.
--        if (mTargetAddress == Constants.ADDR_AUDIO_SYSTEM
--            && localDevice().mAddress != Constants.ADDR_TV) {
--            sendCommand(HdmiCecMessageBuilder.buildUserControlPressed(getSourceAddress(),
--                mTargetAddress, cecKeycodeAndParams), new SendMessageCallback() {
--                @Override
--                public void onSendCompleted(int error) {
--                    if (error != SendMessageResult.SUCCESS) {
--                        HdmiLogger.debug(
--                            "AVR did not respond to <User Control Pressed>");
-+
-+        sendCommand(HdmiCecMessageBuilder.buildUserControlPressed(getSourceAddress(),
-+            mTargetAddress, cecKeycodeAndParams), new SendMessageCallback() {
-+            @Override
-+            public void onSendCompleted(int error) {
-+                if (error != SendMessageResult.SUCCESS) {
-+                    // Devices that are not directly connected with audio system device can't detect if the
-+                    // audio system device is still plugged in. Framework checks if the volume key forwarding is
-+                    // successful or not every time to make sure the System Audio Mode status is still updated.
-+                    if (mTargetAddress == Constants.ADDR_AUDIO_SYSTEM
-+                        && localDevice().mAddress != Constants.ADDR_TV) {
-+                        HdmiLogger.debug("AVR did not respond to <User Control Pressed>");
-                         localDevice().mService.setSystemAudioActivated(false);
-                     }
-                 }
--            });
--        } else {
--            sendCommand(HdmiCecMessageBuilder.buildUserControlPressed(getSourceAddress(),
--                    mTargetAddress, cecKeycodeAndParams));
--        }
-+                HdmiLogger.debug("send key event over " + keycode + SendKeyAction.this);
-+                mFinishLastKeyEvent = true;
-+                mLastSendKeyTime = getCurrentTime();
-+                mLastKeycode = keycode;
-+                if (!HdmiCecKeycode.isRepeatableKey(keycode)) {
-+                    sendKeyUp();
-+                    finish();
-+                    return;
-+                }
-+                mActionTimer.clearTimerMessage();
-+                addTimer(mState, AWAIT_RELEASE_KEY_MS);
-+            }
-+        });
-     }
- 
-     private void sendKeyUp() {
-         sendCommand(HdmiCecMessageBuilder.buildUserControlReleased(getSourceAddress(),
--                mTargetAddress));
-+                mTargetAddress), new SendMessageCallback() {
-+            @Override
-+            public void onSendCompleted(int error) {
-+                mActionTimer.clearTimerMessage();
-+            }
-+        });
-     }
- 
-     @Override
-@@ -189,8 +193,6 @@ final class SendKeyAction extends HdmiCecFeatureAction {
+@@ -188,7 +188,6 @@ final class SendKeyAction extends HdmiCecFeatureAction {
+                 // The first key press lasts long enough to start press-and-hold.
                  mActionTimer.clearTimerMessage();
                  mState = STATE_PROCESSING_KEYCODE;
-                 sendKeyDown(mLastKeycode);
--                mLastSendKeyTime = getCurrentTime();
--                addTimer(mState, AWAIT_RELEASE_KEY_MS);
+-                sendKeyDown(mLastKeycode);
+                 mLastSendKeyTime = getCurrentTime();
+                 addTimer(mState, AWAIT_RELEASE_KEY_MS);
                  break;
-             case STATE_PROCESSING_KEYCODE:
-                 // Timeout on waiting for the release key event. Send UCR and quit the action.
 diff --git a/services/core/java/com/android/server/hdmi/SetArcTransmissionStateAction.java b/services/core/java/com/android/server/hdmi/SetArcTransmissionStateAction.java
 index 6633789ffc06..8dffc8f942ae 100644
 --- a/services/core/java/com/android/server/hdmi/SetArcTransmissionStateAction.java
