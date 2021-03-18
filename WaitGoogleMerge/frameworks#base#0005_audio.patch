@@ -1,4 +1,4 @@
-From 08fce8e534b2a74156825370a4de79c0a76157ae Mon Sep 17 00:00:00 2001
+From e648a596375afa736bef5373a3d132ecb4374684 Mon Sep 17 00:00:00 2001
 From: "an.xi" <an.xi@amlogic.com>
 Date: Mon, 8 Mar 2021 19:05:43 +0800
 Subject: [PATCH] cec: add volume keyevent paththrough for NTS [1/2]
@@ -6,13 +6,17 @@ Subject: [PATCH] cec: add volume keyevent paththrough for NTS [1/2]
 PD#SWPL-39241
 
 Problem:
-NTS volume paththrough feature. When user uses playback's
+1.NTS volume paththrough feature. When user uses playback's
 remote to control volume in ddp5.0 format, playback should
 transfer the volume keyevents to tv.
+2.SWPL-44684 {T5D}{Android R}{ARC}System audio could not be
+saved after plug/unplug HDMI that connect to ARC amplifier.
+(5/5, Android P ok)
 
 Solution:
-Transfer the volume keyevents to TV when the playback is
+1.Transfer the volume keyevents to TV when the playback is
 using dpp5.0 audio format.
+2.Modify the getDeviceForStream strategy.
 
 Verify:
 newton
@@ -23,8 +27,8 @@ Signed-off-by: an.xi <an.xi@amlogic.com>
  core/res/res/values-zh-rCN/strings.xml        |   1 +
  core/res/res/values/strings.xml               |   2 +
  core/res/res/values/symbols.xml               |   1 +
- .../android/server/audio/AudioService.java    | 350 +++++++++++++-----
- 4 files changed, 264 insertions(+), 90 deletions(-)
+ .../android/server/audio/AudioService.java    | 380 +++++++++++++-----
+ 4 files changed, 285 insertions(+), 99 deletions(-)
 
 diff --git a/core/res/res/values-zh-rCN/strings.xml b/core/res/res/values-zh-rCN/strings.xml
 index a645cd7db90a..cadcd21b7bf6 100644
@@ -64,7 +68,7 @@ index 06f357e79a62..ea359c495f92 100644
    <java-symbol type="string" name="webpage_unresponsive" />
    <java-symbol type="string" name="whichApplication" />
 diff --git a/services/core/java/com/android/server/audio/AudioService.java b/services/core/java/com/android/server/audio/AudioService.java
-index e921f04e825f..40caffeffe60 100644
+index e921f04e825f..3f6ef5f04d5a 100644
 --- a/services/core/java/com/android/server/audio/AudioService.java
 +++ b/services/core/java/com/android/server/audio/AudioService.java
 @@ -143,6 +143,7 @@ import android.widget.Toast;
@@ -335,7 +339,49 @@ index e921f04e825f..40caffeffe60 100644
              return;
          }
          VolumeStreamState streamState = mStreamStates[streamType];
-@@ -6077,6 +6055,9 @@ public class AudioService extends IAudioService.Stub
+@@ -4960,20 +4938,32 @@ public class AudioService extends IAudioService.Stub
+             //  - HDMI-CEC system audio mode only output: give priority to available item in order.
+             // FIXME: Haven't applied audio device type refactor to this API
+             //  as it is going to be deprecated.
+-            if ((device & AudioSystem.DEVICE_OUT_SPEAKER) != 0) {
+-                device = AudioSystem.DEVICE_OUT_SPEAKER;
+-            } else if ((device & AudioSystem.DEVICE_OUT_HDMI_ARC) != 0) {
++            //
++            //
++            //
++            for (int deviceType : AudioSystem.DEVICE_OUT_ALL_A2DP_SET) {
++                if ((deviceType & device) == deviceType) {
++                    return deviceType;
++                }
++            }
++            for (int deviceType : AudioSystem.DEVICE_OUT_ALL_SCO_SET) {
++                if ((deviceType & device) == deviceType) {
++                    return deviceType;
++                }
++            }
++            for (int deviceType : AudioSystem.DEVICE_OUT_ALL_USB_SET) {
++                if ((deviceType & device) == deviceType) {
++                    return deviceType;
++                }
++            }
++            if ((device & AudioSystem.DEVICE_OUT_HDMI_ARC) != 0 && mHdmiSystemAudioSupported) {
+                 device = AudioSystem.DEVICE_OUT_HDMI_ARC;
++            } else if ((device & AudioSystem.DEVICE_OUT_SPEAKER) != 0) {
++                device = AudioSystem.DEVICE_OUT_SPEAKER;
+             } else if ((device & AudioSystem.DEVICE_OUT_SPDIF) != 0) {
+                 device = AudioSystem.DEVICE_OUT_SPDIF;
+             } else if ((device & AudioSystem.DEVICE_OUT_AUX_LINE) != 0) {
+                 device = AudioSystem.DEVICE_OUT_AUX_LINE;
+-            } else {
+-                for (int deviceType : AudioSystem.DEVICE_OUT_ALL_A2DP_SET) {
+-                    if ((deviceType & device) == deviceType) {
+-                        return deviceType;
+-                    }
+-                }
+             }
+         }
+         return device;
+@@ -6077,6 +6067,9 @@ public class AudioService extends IAudioService.Stub
  
          public void checkFixedVolumeDevices() {
              synchronized (VolumeStreamState.class) {
@@ -345,7 +391,7 @@ index e921f04e825f..40caffeffe60 100644
                  // ignore settings for fixed volume devices: volume should always be at max or 0
                  if (mStreamVolumeAlias[mStreamType] == AudioSystem.STREAM_MUSIC) {
                      for (int i = 0; i < mIndexMap.size(); i++) {
-@@ -6092,6 +6073,25 @@ public class AudioService extends IAudioService.Stub
+@@ -6092,6 +6085,25 @@ public class AudioService extends IAudioService.Stub
              }
          }
  
@@ -371,7 +417,7 @@ index e921f04e825f..40caffeffe60 100644
          private int getValidIndex(int index, boolean hasModifyAudioSettings) {
              final int indexMin = hasModifyAudioSettings ? mIndexMin : mIndexMinNoPerm;
              if (index < indexMin) {
-@@ -7270,25 +7270,19 @@ public class AudioService extends IAudioService.Stub
+@@ -7270,25 +7282,19 @@ public class AudioService extends IAudioService.Stub
  
      @GuardedBy("mHdmiClientLock")
      private void updateHdmiCecSinkLocked(boolean hdmiCecSink) {
@@ -402,7 +448,7 @@ index e921f04e825f..40caffeffe60 100644
      }
  
      private class MyHdmiControlStatusChangeListenerCallback
-@@ -7296,7 +7290,21 @@ public class AudioService extends IAudioService.Stub
+@@ -7296,7 +7302,21 @@ public class AudioService extends IAudioService.Stub
          public void onStatusChange(boolean isCecEnabled, boolean isCecAvailable) {
              synchronized (mHdmiClientLock) {
                  if (mHdmiManager == null) return;
@@ -424,7 +470,7 @@ index e921f04e825f..40caffeffe60 100644
              }
          }
      };
-@@ -7311,6 +7319,15 @@ public class AudioService extends IAudioService.Stub
+@@ -7311,6 +7331,15 @@ public class AudioService extends IAudioService.Stub
          }
      };
  
@@ -440,7 +486,7 @@ index e921f04e825f..40caffeffe60 100644
      private final Object mHdmiClientLock = new Object();
  
      // If HDMI-CEC system audio is supported
-@@ -7337,12 +7354,161 @@ public class AudioService extends IAudioService.Stub
+@@ -7337,12 +7366,161 @@ public class AudioService extends IAudioService.Stub
      @GuardedBy("mHdmiClientLock")
      private boolean mHdmiCecVolumeControlEnabled;
  
@@ -604,7 +650,7 @@ index e921f04e825f..40caffeffe60 100644
      @Override
      public int setHdmiSystemAudioSupported(boolean on) {
          int device = AudioSystem.DEVICE_NONE;
-@@ -7579,6 +7745,7 @@ public class AudioService extends IAudioService.Stub
+@@ -7579,6 +7757,7 @@ public class AudioService extends IAudioService.Stub
          pw.print("  mIsSingleVolume="); pw.println(mIsSingleVolume);
          pw.print("  mUseFixedVolume="); pw.println(mUseFixedVolume);
          pw.print("  mFixedVolumeDevices="); pw.println(dumpDeviceTypes(mFixedVolumeDevices));
@@ -612,7 +658,7 @@ index e921f04e825f..40caffeffe60 100644
          pw.print("  mExtVolumeController="); pw.println(mExtVolumeController);
          pw.print("  mHdmiCecSink="); pw.println(mHdmiCecSink);
          pw.print("  mHdmiAudioSystemClient="); pw.println(mHdmiAudioSystemClient);
-@@ -7586,6 +7753,9 @@ public class AudioService extends IAudioService.Stub
+@@ -7586,6 +7765,9 @@ public class AudioService extends IAudioService.Stub
          pw.print("  mHdmiTvClient="); pw.println(mHdmiTvClient);
          pw.print("  mHdmiSystemAudioSupported="); pw.println(mHdmiSystemAudioSupported);
          pw.print("  mHdmiCecVolumeControlEnabled="); pw.println(mHdmiCecVolumeControlEnabled);
@@ -623,5 +669,5 @@ index e921f04e825f..40caffeffe60 100644
          pw.print("  mic mute FromSwitch=" + mMicMuteFromSwitch
                          + " FromRestrictions=" + mMicMuteFromRestrictions
 -- 
-2.26.1
+2.29.0
 
