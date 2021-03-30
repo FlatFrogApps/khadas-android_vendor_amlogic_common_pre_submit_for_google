@@ -1,0 +1,39 @@
+From 3b97c826750628dd2a7836cee72d1961b6a9b2e7 Mon Sep 17 00:00:00 2001
+From: "shuai.zhang" <shuai.zhang@amlogic.com>
+Date: Tue, 30 Mar 2021 14:19:16 +0800
+Subject: [PATCH] pre_submit_for_google: Camera crash when video recording
+ [1/1]
+
+PD#SWPL-46151
+
+Problem:
+Camera crash when video recording
+
+Solution:
+Change the video file extension
+
+Verify:
+ohm
+
+Signed-off-by: shuai.zhang<shuai.zhang@amlogic.com>
+Change-Id: I9ef7b8c357d44bdf3114c97dcd5950c85c15136a
+---
+ src/com/android/camera/VideoModule.java | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/com/android/camera/VideoModule.java b/src/com/android/camera/VideoModule.java
+index 457a8640c..0fcad4614 100644
+--- a/src/com/android/camera/VideoModule.java
++++ b/src/com/android/camera/VideoModule.java
+@@ -1250,7 +1250,7 @@ public class VideoModule extends CameraModule
+         String filename = title + convertOutputFormatToFileExt(outputFileFormat);
+         String mime = convertOutputFormatToMimeType(outputFileFormat);
+         String path = Storage.DIRECTORY + '/' + filename;
+-        String tmpPath = path + ".tmp";
++        String tmpPath = path;
+         mCurrentVideoValues = new ContentValues(9);
+         mCurrentVideoValues.put(Video.Media.TITLE, title);
+         mCurrentVideoValues.put(Video.Media.DISPLAY_NAME, filename);
+-- 
+2.29.0
+
