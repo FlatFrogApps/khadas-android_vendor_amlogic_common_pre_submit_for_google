@@ -1,0 +1,57 @@
+From 77ceeb221f7d600dfbce3f1d4cf17a4d9b06535a Mon Sep 17 00:00:00 2001
+From: Jian Wang <jian.wang@amlogic.com>
+Date: Tue, 13 Apr 2021 21:15:20 +0800
+Subject: [PATCH] frameworks: fix set profile error [1/1]
+
+PD#SWPL-45972
+
+Problem:
+Aosp version have this commit, and gtvs version do not have:
+commit 70b5589086ec3cbb1a5bd3d13eef7cfb4020d1fe
+Author: Gopalakrishnan Nallasamy <gokrishnan@google.com>
+Date:   Fri Aug 28 15:43:30 2020 -0700
+    MediaMuxer:Avoid hang during stop() on empty track
+
+It will return if do not have csd2 for dv, so do not
+set profile to omx
+
+Solution:
+call mediaext convert before check csd2 return
+
+Verify:
+Ohm
+
+Signed-off-by: Jian Wang <jian.wang@amlogic.com>
+Change-Id: I73bee696b9eb26d2fc311ec0c7ab95c363074e75
+---
+ media/libstagefright/Utils.cpp | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/media/libstagefright/Utils.cpp b/media/libstagefright/Utils.cpp
+index 7351de8c08..a39f1ba1f1 100644
+--- a/media/libstagefright/Utils.cpp
++++ b/media/libstagefright/Utils.cpp
+@@ -1682,6 +1682,9 @@ status_t convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
+     }
+ 
+     convertMessageToMetaDataFromMappings(msg, meta);
++#if (!defined STAGEFRIGHT_PLAYER2) && (!defined MPEG2EXTRACTOR)
++    MediaVendorExt::imp()->convertMessageToMetaData(msg, meta);
++#endif
+ 
+     int32_t systemId;
+     if (msg->findInt32("ca-system-id", &systemId)) {
+@@ -1997,10 +2000,6 @@ status_t convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
+         }
+     }
+     // XXX TODO add whatever other keys there are
+-#if (!defined STAGEFRIGHT_PLAYER2) && (!defined MPEG2EXTRACTOR)
+-    MediaVendorExt::imp()->convertMessageToMetaData(msg, meta);
+-#endif
+-
+ #if 0
+     ALOGI("converted %s to:", msg->debugString(0).c_str());
+     meta->dumpToLog();
+-- 
+2.28.0
+
