@@ -1,0 +1,39 @@
+From 62f0a786d20f4122c511f1a36ef0f1534c36714d Mon Sep 17 00:00:00 2001
+From: yuehu mi <yuehu.mi@amlogic.com>
+Date: Wed, 14 Apr 2021 16:40:42 +0800
+Subject: [PATCH] DisplayPowerController: fix app UI flicker after STR wakeup
+ [1/1]
+
+PD#SWPL-46989
+
+Problem:
+app UI flicker after STR wakeup on low mem device
+
+Solution:
+set mColorFadeEnabled true on on low mem device
+
+Verify:
+redi
+
+Change-Id: I21bdfcc5741b1e0d892f7ff1e74fdd3d6e83cfba
+Signed-off-by: yuehu mi <yuehu.mi@amlogic.com>
+---
+ .../java/com/android/server/display/DisplayPowerController.java | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/display/DisplayPowerController.java b/services/core/java/com/android/server/display/DisplayPowerController.java
+index 9411c5629457..9a054c6f0044 100644
+--- a/services/core/java/com/android/server/display/DisplayPowerController.java
++++ b/services/core/java/com/android/server/display/DisplayPowerController.java
+@@ -515,7 +515,7 @@ final class DisplayPowerController implements AutomaticBrightnessController.Call
+             }
+         }
+ 
+-        mColorFadeEnabled = !ActivityManager.isLowRamDeviceStatic();
++        mColorFadeEnabled = true; //!ActivityManager.isLowRamDeviceStatic();
+         mColorFadeFadesConfig = resources.getBoolean(
+                 com.android.internal.R.bool.config_animateScreenLights);
+ 
+-- 
+2.29.0
+
