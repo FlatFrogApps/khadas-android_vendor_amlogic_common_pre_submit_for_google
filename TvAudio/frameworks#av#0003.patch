@@ -1,0 +1,47 @@
+From 1d33bb28c4aebfcdd26bbbb526011595a8052bc4 Mon Sep 17 00:00:00 2001
+From: yuehu mi <yuehu.mi@amlogic.com>
+Date: Wed, 14 Apr 2021 20:49:13 +0800
+Subject: [PATCH] TimeCheck: native mediaserver always OK [1/1]
+
+PD#SWPL-45958
+
+Problem:
+TimeCheck timeout
+
+Solution:
+Mediaserver may forward the client PID and UID
+as part of a binder interface call
+
+Verify:
+redi
+
+Change-Id: I38c09f5a79ae3614a1d46a0edd8a25651737b414
+Signed-off-by: yuehu mi <yuehu.mi@amlogic.com>
+---
+ media/utils/ServiceUtilities.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/media/utils/ServiceUtilities.cpp b/media/utils/ServiceUtilities.cpp
+index 87ea084811..304369aa11 100644
+--- a/media/utils/ServiceUtilities.cpp
++++ b/media/utils/ServiceUtilities.cpp
+@@ -21,6 +21,7 @@
+ #include <binder/IPCThreadState.h>
+ #include <binder/IServiceManager.h>
+ #include <binder/PermissionCache.h>
++
+ #include "mediautils/ServiceUtilities.h"
+ 
+ #include <iterator>
+@@ -169,7 +170,7 @@ bool captureHotwordAllowed(const String16& opPackageName, pid_t pid, uid_t uid)
+ 
+ bool settingsAllowed() {
+     // given this is a permission check, could this be isAudioServerOrRootUid()?
+-    if (isAudioServerUid(IPCThreadState::self()->getCallingUid())) return true;
++    if (isAudioServerOrMediaServerUid(IPCThreadState::self()->getCallingUid())) return true;
+     static const String16 sAudioSettings("android.permission.MODIFY_AUDIO_SETTINGS");
+     // IMPORTANT: Use PermissionCache - not a runtime permission and may not change.
+     bool ok = PermissionCache::checkCallingPermission(sAudioSettings);
+-- 
+2.29.0
+
