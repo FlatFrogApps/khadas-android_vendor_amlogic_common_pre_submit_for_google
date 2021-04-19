@@ -1,0 +1,39 @@
+From 581dbcba8673f57ff0fe5a9f0de44a1516fbbd3f Mon Sep 17 00:00:00 2001
+From: Robin Lee <rgl@google.com>
+Date: Tue, 19 Jan 2021 20:50:01 +0000
+Subject: [PATCH] Merge "SurfaceFlinger: fix no small window displayed in PIP
+ mode of DTVKIT [1/1]" am: cb8eb2be57 am: 5c1bc9bc86 am: 205a70eaf1
+
+Original change: https://android-review.googlesource.com/c/platform/frameworks/native/+/1537927
+
+Bug: 146758432
+Exempt-From-Owner-Approval: TV private branch
+Change-Id: I504b91555be57f5a3b6f0d04757ebce136bd9611
+(cherry picked from commit e74432c55a7bd6cc904ecb673ac567e343cfe89b)
+---
+ services/surfaceflinger/BufferLayer.cpp | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/services/surfaceflinger/BufferLayer.cpp b/services/surfaceflinger/BufferLayer.cpp
+index f0b0200bc..df26a3db7 100644
+--- a/services/surfaceflinger/BufferLayer.cpp
++++ b/services/surfaceflinger/BufferLayer.cpp
+@@ -176,7 +176,14 @@ std::optional<compositionengine::LayerFE::LayerSettings> BufferLayer::prepareCli
+         if (!holes.isEmpty()) {
+             targetSettings.clearRegion.orSelf(holes);
+         }
+-        return std::nullopt;
++
++        if (mSidebandStream != nullptr) {
++            // For surfaceview of tv sideband, there is no activeBuffer
++            // in bufferqueue, we need return LayerSettings.
++            return result;
++        } else {
++            return std::nullopt;
++        }
+     }
+     bool blackOutLayer = (isProtected() && !targetSettings.supportsProtectedContent) ||
+             (isSecure() && !targetSettings.isSecure);
+-- 
+2.28.0
+
