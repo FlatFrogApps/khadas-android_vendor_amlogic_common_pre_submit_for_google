@@ -1,0 +1,68 @@
+From 5b0aa3ed5c841589b541302619c6c0216c9388f2 Mon Sep 17 00:00:00 2001
+From: ryanlwlin <ryanlwlin@google.com>
+Date: Mon, 3 Aug 2020 21:23:59 +0800
+Subject: [PATCH] Fix AccessibilityEmbeddedHierarchyTest failure
+
+The visiblity calculation of the embedded node relies on the parent
+window bounds.Unfortunately, we report it only if the window is
+covered by other windows.
+
+We report it if this request is from an embedded hierarchy window.
+
+Test: atest AccessibilityEmbeddedHierarchyTest on TV emulator
+Bug: 155261657
+Change-Id: I0033470cdeabf84dd2fa6158a9b7d46870aca556
+---
+ .../AccessibilityWindowManager.java            | 18 +++++++++++++-----
+ 1 file changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/services/accessibility/java/com/android/server/accessibility/AccessibilityWindowManager.java b/services/accessibility/java/com/android/server/accessibility/AccessibilityWindowManager.java
+index d15c60b9501d..e6fae4a8c822 100644
+--- a/services/accessibility/java/com/android/server/accessibility/AccessibilityWindowManager.java
++++ b/services/accessibility/java/com/android/server/accessibility/AccessibilityWindowManager.java
+@@ -284,11 +284,13 @@ public class AccessibilityWindowManager {
+          * Computes partial interactive region of given windowId.
+          *
+          * @param windowId The windowId
++         * @param forceComputeRegion set outRegion when the windowId matches one on the screen even
++         *                           though the region is not covered by other windows above it.
+          * @param outRegion The output to which to write the bounds.
+-         * @return true if outRegion is not empty.
++         * @return {@code true} if outRegion is not empty.
+          */
+         boolean computePartialInteractiveRegionForWindowLocked(int windowId,
+-                @NonNull Region outRegion) {
++                boolean forceComputeRegion, @NonNull Region outRegion) {
+             if (mWindows == null) {
+                 return false;
+             }
+@@ -309,6 +311,9 @@ public class AccessibilityWindowManager {
+                         currentWindow.getRegionInScreen(currentWindowRegions);
+                         outRegion.set(currentWindowRegions);
+                         windowInteractiveRegion = outRegion;
++                        if (forceComputeRegion) {
++                            windowInteractiveRegionChanged = true;
++                        }
+                         continue;
+                     }
+                 } else if (currentWindow.getType()
+@@ -1234,10 +1239,13 @@ public class AccessibilityWindowManager {
+      */
+     public boolean computePartialInteractiveRegionForWindowLocked(int windowId,
+             @NonNull Region outRegion) {
+-        windowId = resolveParentWindowIdLocked(windowId);
+-        final DisplayWindowsObserver observer = getDisplayWindowObserverByWindowIdLocked(windowId);
++        final int parentWindowId = resolveParentWindowIdLocked(windowId);
++        final DisplayWindowsObserver observer = getDisplayWindowObserverByWindowIdLocked(
++                parentWindowId);
++
+         if (observer != null) {
+-            return observer.computePartialInteractiveRegionForWindowLocked(windowId, outRegion);
++            return observer.computePartialInteractiveRegionForWindowLocked(parentWindowId,
++                    parentWindowId != windowId, outRegion);
+         }
+ 
+         return false;
+-- 
+2.29.0
+
