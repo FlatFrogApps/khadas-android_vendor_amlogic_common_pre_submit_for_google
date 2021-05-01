@@ -1,0 +1,111 @@
+From 2c6d5f2ab4f974cca66aa924b6f7c051eb91cb22 Mon Sep 17 00:00:00 2001
+From: "rongjun.chen" <rongjun.chen@amlogic.com>
+Date: Sat, 1 May 2021 14:59:23 +0800
+Subject: [PATCH] wifi: arp lost let wifi disconnect [1/1]
+
+PD#SWPL-48755
+
+Problem:
+1/wifi disconnect issue
+2/wifi scan when disconnect state
+
+Solution:
+set arp lost reach to false
+
+Verify:
+s905y4
+
+Change-Id: I125bff806cb729c85da395f72e597de32e58fc8f
+Signed-off-by: rongjun.chen <rongjun.chen@amlogic.com>
+---
+ .../java/com/android/server/wifi/ClientModeImpl.java |  5 ++---
+ .../android/server/wifi/WifiConnectivityManager.java | 12 +++++++++---
+ 2 files changed, 11 insertions(+), 6 deletions(-)
+ mode change 100644 => 100755 service/java/com/android/server/wifi/WifiConnectivityManager.java
+
+diff --git a/service/java/com/android/server/wifi/ClientModeImpl.java b/service/java/com/android/server/wifi/ClientModeImpl.java
+index fd79d8258..0ff4c6992 100644
+--- a/service/java/com/android/server/wifi/ClientModeImpl.java
++++ b/service/java/com/android/server/wifi/ClientModeImpl.java
+@@ -185,7 +185,6 @@ public class ClientModeImpl extends StateMachine {
+     private static final String EXTRA_PASSPOINT_CONFIGURATION = "PasspointConfiguration";
+     private static final int IPCLIENT_STARTUP_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes!
+     private static final int IPCLIENT_SHUTDOWN_TIMEOUT_MS = 60_000; // 60 seconds
+-
+     private boolean mVerboseLoggingEnabled = false;
+     private final WifiPermissionsWrapper mWifiPermissionsWrapper;
+ 
+@@ -255,7 +254,7 @@ public class ClientModeImpl extends StateMachine {
+     private int mLastSubId;
+     private String mLastSimBasedConnectionCarrierName;
+ 
+-    private boolean mIpReachabilityDisconnectEnabled = true;
++    private boolean mIpReachabilityDisconnectEnabled = false;
+ 
+     private void processRssiThreshold(byte curRssi, int reason,
+             WifiNative.WifiRssiEventHandler rssiHandler) {
+@@ -5414,7 +5413,7 @@ public class ClientModeImpl extends StateMachine {
+                                 // If this was not the last selected network, update network
+                                 // selection status to temporarily disable the network.
+                                 if (mWifiConfigManager.getLastSelectedNetwork() != config.networkId
+-                                        && !config.noInternetAccessExpected) {
++                                        && !config.noInternetAccessExpected ) {
+                                     Log.i(TAG, "Temporarily disabling network because of"
+                                             + "no-internet access");
+                                     mWifiConfigManager.updateNetworkSelectionStatus(
+diff --git a/service/java/com/android/server/wifi/WifiConnectivityManager.java b/service/java/com/android/server/wifi/WifiConnectivityManager.java
+old mode 100644
+new mode 100755
+index 2ce0bc024..da069d8ff
+--- a/service/java/com/android/server/wifi/WifiConnectivityManager.java
++++ b/service/java/com/android/server/wifi/WifiConnectivityManager.java
+@@ -170,6 +170,7 @@ public class WifiConnectivityManager {
+     private int mSingleScanRestartCount = 0;
+     private int mTotalConnectivityAttemptsRateLimited = 0;
+     private String mLastConnectionAttemptBssid = null;
++    private int mPeriodicSingleScanInterval = 5000;
+     private long mLastPeriodicSingleScanTimeStamp = RESET_TIME_STAMP;
+     private long mLastNetworkSelectionTimeStamp = RESET_TIME_STAMP;
+     private boolean mPnoScanStarted = false;
+@@ -1099,10 +1100,10 @@ public class WifiConnectivityManager {
+         }
+ 
+         long currentTimeStamp = mClock.getElapsedSinceBootMillis();
+-
++       List<WifiConfiguration> savedNetworks = mConfigManager.getSavedNetworks(Process.WIFI_UID);
+         if (mLastPeriodicSingleScanTimeStamp != RESET_TIME_STAMP) {
+             long msSinceLastScan = currentTimeStamp - mLastPeriodicSingleScanTimeStamp;
+-            if (msSinceLastScan < getScheduledSingleScanIntervalMs(0)) {
++            if (msSinceLastScan < getScheduledSingleScanIntervalMs(0) && !(savedNetworks.size() > 0 && mWifiState == WIFI_STATE_DISCONNECTED)) {
+                 localLog("Last periodic single scan started " + msSinceLastScan
+                         + "ms ago, defer this new scan request.");
+                 schedulePeriodicScanTimer(
+@@ -1163,11 +1164,16 @@ public class WifiConnectivityManager {
+             }
+ 
+             startSingleScan(isFullBandScan, WIFI_WORK_SOURCE);
++            if (savedNetworks.size() > 0 && mWifiState == WIFI_STATE_DISCONNECTED) {
++               mPeriodicSingleScanInterval= 5000;
++            schedulePeriodicScanTimer(mPeriodicSingleScanInterval);
++			} else {
+             schedulePeriodicScanTimer(
+                     getScheduledSingleScanIntervalMs(mCurrentSingleScanScheduleIndex));
+ 
+             // Set up the next scan interval in an exponential backoff fashion.
+             mCurrentSingleScanScheduleIndex++;
++			}
+         } else {
+             // Since we already skipped this scan, keep the same scan interval for next scan.
+             schedulePeriodicScanTimer(
+@@ -1293,7 +1299,7 @@ public class WifiConnectivityManager {
+     // Start a periodic scan when screen is on
+     private void startPeriodicScan(boolean scanImmediately) {
+         mPnoScanListener.resetLowRssiNetworkRetryDelay();
+-
++	List<WifiConfiguration> savedNetworks = mConfigManager.getSavedNetworks(Process.WIFI_UID);
+         // No connectivity scan if auto roaming is disabled.
+         if (mWifiState == WIFI_STATE_CONNECTED && !mContext.getResources().getBoolean(
+                 R.bool.config_wifi_framework_enable_associated_network_selection)) {
+-- 
+2.29.0
+
