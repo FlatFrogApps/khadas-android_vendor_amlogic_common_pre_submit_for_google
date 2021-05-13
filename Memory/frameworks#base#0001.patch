@@ -1,0 +1,97 @@
+From 4cb82f6ff4d3d90dd1d20abe769438f041ed8fb0 Mon Sep 17 00:00:00 2001
+From: Shuide Chen <shuide.chen@amlogic.com>
+Date: Thu, 13 May 2021 20:58:44 +0800
+Subject: [PATCH] memory: remove some useless debug log [1/1]
+
+PD#TV-34180
+
+Problem:
+need save memory as much as possible
+
+Solution:
+remove useless buffer for log
+
+Verify:
+Locally
+
+Signed-off-by: Shuide Chen <shuide.chen@amlogic.com>
+Change-Id: I6768a3c93b0a25f61d8fdb4653b2fda1f350921b
+---
+ .../com/android/internal/os/BatteryStatsImpl.java    |  2 +-
+ .../com/android/systemui/log/dagger/LogModule.java   | 12 ++++++------
+ 2 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/core/java/com/android/internal/os/BatteryStatsImpl.java b/core/java/com/android/internal/os/BatteryStatsImpl.java
+index 5a1af84eccac..1104c2e95ac1 100644
+--- a/core/java/com/android/internal/os/BatteryStatsImpl.java
++++ b/core/java/com/android/internal/os/BatteryStatsImpl.java
+@@ -13006,7 +13006,7 @@ public class BatteryStatsImpl extends BatteryStats {
+         private static final int DEFAULT_MAX_HISTORY_FILES = 32;
+         private static final int DEFAULT_MAX_HISTORY_BUFFER_KB = 128; /*Kilo Bytes*/
+         private static final int DEFAULT_MAX_HISTORY_FILES_LOW_RAM_DEVICE = 64;
+-        private static final int DEFAULT_MAX_HISTORY_BUFFER_LOW_RAM_DEVICE_KB = 64; /*Kilo Bytes*/
++        private static final int DEFAULT_MAX_HISTORY_BUFFER_LOW_RAM_DEVICE_KB = 1; /*Kilo Bytes*/
+         private static final int DEFAULT_BATTERY_CHARGED_DELAY_MS = 900000; /* 15 min */
+ 
+         public boolean TRACK_CPU_TIMES_BY_PROC_STATE = DEFAULT_TRACK_CPU_TIMES_BY_PROC_STATE;
+diff --git a/packages/SystemUI/src/com/android/systemui/log/dagger/LogModule.java b/packages/SystemUI/src/com/android/systemui/log/dagger/LogModule.java
+index 16f76deca6c6..e7178ff4c400 100644
+--- a/packages/SystemUI/src/com/android/systemui/log/dagger/LogModule.java
++++ b/packages/SystemUI/src/com/android/systemui/log/dagger/LogModule.java
+@@ -44,7 +44,7 @@ public class LogModule {
+     public static LogBuffer provideDozeLogBuffer(
+             LogcatEchoTracker bufferFilter,
+             DumpManager dumpManager) {
+-        LogBuffer buffer = new LogBuffer("DozeLog", 100, 10, bufferFilter);
++        LogBuffer buffer = new LogBuffer("DozeLog", 10, 2, bufferFilter);
+         buffer.attach(dumpManager);
+         return buffer;
+     }
+@@ -56,7 +56,7 @@ public class LogModule {
+     public static LogBuffer provideNotificationsLogBuffer(
+             LogcatEchoTracker bufferFilter,
+             DumpManager dumpManager) {
+-        LogBuffer buffer = new LogBuffer("NotifLog", 1000, 10, bufferFilter);
++        LogBuffer buffer = new LogBuffer("NotifLog", 20, 2, bufferFilter);
+         buffer.attach(dumpManager);
+         return buffer;
+     }
+@@ -68,7 +68,7 @@ public class LogModule {
+     public static LogBuffer provideNotificationSectionLogBuffer(
+             LogcatEchoTracker bufferFilter,
+             DumpManager dumpManager) {
+-        LogBuffer buffer = new LogBuffer("NotifSectionLog", 1000, 10, bufferFilter);
++        LogBuffer buffer = new LogBuffer("NotifSectionLog", 20, 5, bufferFilter);
+         buffer.attach(dumpManager);
+         return buffer;
+     }
+@@ -80,7 +80,7 @@ public class LogModule {
+     public static LogBuffer provideNotifInteractionLogBuffer(
+             LogcatEchoTracker echoTracker,
+             DumpManager dumpManager) {
+-        LogBuffer buffer = new LogBuffer("NotifInteractionLog", 50, 10, echoTracker);
++        LogBuffer buffer = new LogBuffer("NotifInteractionLog", 5, 2, echoTracker);
+         buffer.attach(dumpManager);
+         return buffer;
+     }
+@@ -92,7 +92,7 @@ public class LogModule {
+     public static LogBuffer provideQuickSettingsLogBuffer(
+             LogcatEchoTracker bufferFilter,
+             DumpManager dumpManager) {
+-        LogBuffer buffer = new LogBuffer("QSLog", 500, 10, bufferFilter);
++        LogBuffer buffer = new LogBuffer("QSLog", 10, 2, bufferFilter);
+         buffer.attach(dumpManager);
+         return buffer;
+     }
+@@ -104,7 +104,7 @@ public class LogModule {
+     public static LogBuffer provideBroadcastDispatcherLogBuffer(
+             LogcatEchoTracker bufferFilter,
+             DumpManager dumpManager) {
+-        LogBuffer buffer = new LogBuffer("BroadcastDispatcherLog", 500, 10, bufferFilter);
++        LogBuffer buffer = new LogBuffer("BroadcastDispatcherLog", 20, 2, bufferFilter);
+         buffer.attach(dumpManager);
+         return buffer;
+     }
+-- 
+2.26.1
+
