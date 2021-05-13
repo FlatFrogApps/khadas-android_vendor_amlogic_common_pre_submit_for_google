@@ -1,0 +1,48 @@
+From 131dd1b57da4103482927a23457b9d7c29bf2abd Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Wed, 12 May 2021 19:56:35 +0800
+Subject: [PATCH] cec: do One Touch Play after boot [1/1]
+
+PD#SWPL-50044
+
+Problem:
+new feature, customer would like the box to do
+otp to wake up tv and tune to it after boot.
+
+Solution:
+do One Touch Play when the initiation mode is boot.
+
+Verify:
+newton
+
+Change-Id: Ib479396ace7d9a9ae8bcd44d524963a1645e6df8
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../server/hdmi/HdmiCecLocalDevicePlayback.java       | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
+index 09bf45b534f3..60578a258f0c 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
+@@ -136,6 +136,17 @@ public class HdmiCecLocalDevicePlayback extends HdmiCecLocalDeviceSource {
+                         }
+                     });
+         }
++        if (reason == mService.INITIATED_BY_BOOT_UP) {
++            Slog.d(TAG, "Trigger one touch play after boot!");
++            oneTouchPlay(new IHdmiControlCallback.Stub() {
++                @Override
++                public void onComplete(int result) {
++                    if (result != HdmiControlManager.RESULT_SUCCESS) {
++                        Slog.w(TAG, "One touch play failed: " + result);
++                    }
++                }
++            });
++        }
+         startQueuedActions();
+     }
+ 
+-- 
+2.26.1
+
