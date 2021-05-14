@@ -1,0 +1,37 @@
+From c05614747b32d5edb804cad451104b68edeb1f8f Mon Sep 17 00:00:00 2001
+From: che song <che.song@amlogic.com>
+Date: Fri, 14 May 2021 11:19:41 +0800
+Subject: [PATCH] Audio: fix usb card no sound when plug in [1/1]
+
+PD#SWPL-46921
+
+Problem:
+[Android R] AudioFlinger get device parameters err
+
+Solution:
+add delay to ensure driver init completed
+
+Verify:
+redi
+
+Change-Id: I71731e1e58c79bb20dd3955155c1cbbbf8c1999c
+Signed-off-by: Che Song <che.song@amlogic.com>
+---
+ alsa_utils/alsa_device_profile.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/alsa_utils/alsa_device_profile.c b/alsa_utils/alsa_device_profile.c
+index 6b76bbe7..d8f351ea 100644
+--- a/alsa_utils/alsa_device_profile.c
++++ b/alsa_utils/alsa_device_profile.c
+@@ -399,6 +399,7 @@ bool profile_read_device_info(alsa_device_profile* profile)
+         return false;
+     }
+ 
++    usleep(90000);
+     /* let's get some defaults */
+     read_alsa_device_config(profile, &profile->default_config);
+     ALOGV("default_config chans:%d rate:%d format:%d count:%d size:%d",
+-- 
+2.28.0
+
