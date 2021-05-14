@@ -1,0 +1,59 @@
+From 4c3a10e5d759741e1e9dbda6b51ca225cb151bb5 Mon Sep 17 00:00:00 2001
+From: "qiyao.zhou" <qiyao.zhou@amlogic.com>
+Date: Fri, 14 May 2021 14:41:29 +0800
+Subject: [PATCH] LiveTv: Need notice the bluescreen set status to TvView.
+ [1/1]
+
+PD#SWPL-45705
+
+Problem:
+Need notice the bluescreen set status to TvView.
+
+Solution:
+Use sendAppPrivateCommand to send bluescreen set
+status in tune flow.
+
+Verify:
+ok on redi.
+
+Change-Id: I0d2f2e43d153422f1118b2b40da2260fb9cae51e
+Signed-off-by: qiyao.zhou <qiyao.zhou@amlogic.com>
+---
+ media/java/android/media/tv/TvView.java | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/media/java/android/media/tv/TvView.java b/media/java/android/media/tv/TvView.java
+index 38b54c45911a..a76cfbad6bc8 100644
+--- a/media/java/android/media/tv/TvView.java
++++ b/media/java/android/media/tv/TvView.java
+@@ -107,6 +107,7 @@ public class TvView extends ViewGroup {
+     private int mSurfaceViewTop;
+     private int mSurfaceViewBottom;
+     private TimeShiftPositionCallback mTimeShiftPositionCallback;
++    private boolean mIsBlueScreenEnable;
+ 
+     private final SurfaceHolder.Callback mSurfaceHolderCallback = new SurfaceHolder.Callback() {
+         @Override
+@@ -571,6 +572,10 @@ public class TvView extends ViewGroup {
+         if (TextUtils.isEmpty(action)) {
+             throw new IllegalArgumentException("action cannot be null or an empty string");
+         }
++        if (action.equals("blue_screen_setting")) {
++            mIsBlueScreenEnable = data.getBoolean("blue_screen_setting", false);;
++        }
++
+         if (mSession != null) {
+             mSession.sendAppPrivateCommand(action, data);
+         } else {
+@@ -779,7 +784,7 @@ public class TvView extends ViewGroup {
+ 
+     private boolean isBlueScreenEnabled () {
+         //no need show blue screen on preview window
+-        return getWidth() > 720 && getHeight() > 480 && SystemProperties.getBoolean("persist.tv.blue.screen.enabled", false);
++        return getWidth() > 720 && getHeight() > 480 && mIsBlueScreenEnable;
+     }
+ 
+     private void resetSurfaceView() {
+-- 
+2.29.0
+
