@@ -1,4 +1,4 @@
-From 131dd1b57da4103482927a23457b9d7c29bf2abd Mon Sep 17 00:00:00 2001
+From 94a99642791719b5b4c55e7fbcc17a38dbdcd6ae Mon Sep 17 00:00:00 2001
 From: "an.xi" <an.xi@amlogic.com>
 Date: Wed, 12 May 2021 19:56:35 +0800
 Subject: [PATCH] cec: do One Touch Play after boot [1/1]
@@ -17,15 +17,54 @@ newton
 
 Change-Id: Ib479396ace7d9a9ae8bcd44d524963a1645e6df8
 Signed-off-by: an.xi <an.xi@amlogic.com>
----
- .../server/hdmi/HdmiCecLocalDevicePlayback.java       | 11 +++++++++++
- 1 file changed, 11 insertions(+)
 
+cec: Extend the overtime period for power query [1/1]
+
+PD# SWPL-50368
+
+Problem:
+The audio method for judging whether the connected TV supports
+cec is to send a message to the TV to query the power status,
+and then wait for the message to be returned. The problem is
+that the timeout period specified by the cec protocol is 2 seconds.
+In fact, in the hotplug scene, TV may have a low probability of
+replying to this message for more than 2 seconds, which will cause
+a misjudgment.
+
+Solution:
+Extend the overtime period for power query. Add a method of checking
+if the connected hdmi device supports cec by aosp could be done in
+the future.
+
+Verify:
+Oppen
+
+Change-Id: I9b46bdc4fe45fe3d7f7ac253c28de9a6bbbb6fd3
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../android/server/hdmi/DevicePowerStatusAction.java  |  3 ++-
+ .../server/hdmi/HdmiCecLocalDevicePlayback.java       | 11 +++++++++++
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/hdmi/DevicePowerStatusAction.java b/services/core/java/com/android/server/hdmi/DevicePowerStatusAction.java
+index b52ab76660d7..b9d090f494ff 100644
+--- a/services/core/java/com/android/server/hdmi/DevicePowerStatusAction.java
++++ b/services/core/java/com/android/server/hdmi/DevicePowerStatusAction.java
+@@ -62,7 +62,8 @@ final class DevicePowerStatusAction extends HdmiCecFeatureAction {
+     boolean start() {
+         queryDevicePowerStatus();
+         mState = STATE_WAITING_FOR_REPORT_POWER_STATUS;
+-        addTimer(mState, HdmiConfig.TIMEOUT_MS);
++        // The remote device might use more time to give a response.
++        addTimer(mState, HdmiConfig.TIMEOUT_MS * 2);
+         return true;
+     }
+ 
 diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
-index 09bf45b534f3..60578a258f0c 100644
+index f0c2d001c750..55690548a6b5 100644
 --- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
 +++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
-@@ -136,6 +136,17 @@ public class HdmiCecLocalDevicePlayback extends HdmiCecLocalDeviceSource {
+@@ -128,6 +128,17 @@ public class HdmiCecLocalDevicePlayback extends HdmiCecLocalDeviceSource {
                          }
                      });
          }
