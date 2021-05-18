@@ -1,0 +1,45 @@
+From 1c3bb98ac1cf01cd65f8e7bd0b95eed312c8f23d Mon Sep 17 00:00:00 2001
+From: che song <che.song@amlogic.com>
+Date: Tue, 18 May 2021 19:45:21 +0800
+Subject: [PATCH] audio: add delay before get device parameters [1/1]
+
+PD#SWPL-46921
+
+Problem:
+[Android R] AudioFlinger get device parameters err
+
+Solution:
+add delay to ensure driver init completed
+
+Verify:
+redi
+
+Change-Id: I231b40d7ed2f6073cab952baaf429d690544d3e8
+Signed-off-by: Che Song <che.song@amlogic.com>
+---
+ alsa_utils/alsa_device_profile.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/alsa_utils/alsa_device_profile.c b/alsa_utils/alsa_device_profile.c
+index 6b76bbe7..a7c28f90 100644
+--- a/alsa_utils/alsa_device_profile.c
++++ b/alsa_utils/alsa_device_profile.c
+@@ -22,6 +22,7 @@
+ #include <inttypes.h>
+ #include <stdint.h>
+ #include <stdlib.h>
++#include <unistd.h>
+ #include <cutils/properties.h>
+ 
+ #include <log/log.h>
+@@ -399,6 +400,7 @@ bool profile_read_device_info(alsa_device_profile* profile)
+         return false;
+     }
+ 
++    usleep(90000);
+     /* let's get some defaults */
+     read_alsa_device_config(profile, &profile->default_config);
+     ALOGV("default_config chans:%d rate:%d format:%d count:%d size:%d",
+-- 
+2.28.0
+
