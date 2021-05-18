@@ -1,0 +1,49 @@
+From 474d3c59c3a8ab205be3827a5b0621939135795a Mon Sep 17 00:00:00 2001
+From: Shuai Li <shuai.li@amlogic.com>
+Date: Mon, 17 May 2021 20:26:41 +0800
+Subject: [PATCH] audio: fix camera record no audio issue [1/1]
+
+PD#SWPL-43450
+
+Problem:
+Camera recording no audio output if device no build-in mic attached.
+
+Solution:
+Modify the default audio_policy to select USB in firstly.
+
+Verify:
+S905Y4.
+
+Signed-off-by: Shuai Li <shuai.li@amlogic.com>
+Change-Id: I0a908f250a7cfd7ce3477b7dc09d05d55fcf36f2
+---
+ services/audiopolicy/enginedefault/src/Engine.cpp | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/services/audiopolicy/enginedefault/src/Engine.cpp b/services/audiopolicy/enginedefault/src/Engine.cpp
+index e21c6a7edd..20186aa48e 100644
+--- a/services/audiopolicy/enginedefault/src/Engine.cpp
++++ b/services/audiopolicy/enginedefault/src/Engine.cpp
+@@ -547,7 +547,7 @@ sp<DeviceDescriptor> Engine::getDeviceForInputSource(audio_source_t inputSource)
+             break;
+ 
+         case AUDIO_POLICY_FORCE_SPEAKER:
+-            device = availableDevices.getFirstExistingDevice({
++            device = availableDevices.getFirstExistingDevice({AUDIO_DEVICE_IN_USB_DEVICE,
+                     AUDIO_DEVICE_IN_BACK_MIC, AUDIO_DEVICE_IN_BUILTIN_MIC});
+             break;
+         }
+@@ -585,8 +585,8 @@ sp<DeviceDescriptor> Engine::getDeviceForInputSource(audio_source_t inputSource)
+     case AUDIO_SOURCE_CAMCORDER:
+         // For a device without built-in mic, adding usb device
+         device = availableDevices.getFirstExistingDevice({
+-                AUDIO_DEVICE_IN_BACK_MIC, AUDIO_DEVICE_IN_BUILTIN_MIC,
+-                AUDIO_DEVICE_IN_USB_DEVICE});
++                AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_BACK_MIC,
++                AUDIO_DEVICE_IN_BUILTIN_MIC});
+         break;
+     case AUDIO_SOURCE_VOICE_DOWNLINK:
+     case AUDIO_SOURCE_VOICE_CALL:
+-- 
+2.25.1
+
