@@ -1,0 +1,60 @@
+From 9725614b62827f2b9893ebf3441d7d1b8bb91323 Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Thu, 20 May 2021 11:28:01 +0800
+Subject: [PATCH] cec: setOption SYSTEM_CEC_CONTROL after the device boots
+ [1/1]
+
+PD# SWPL-50642
+
+Problem:
+If TV's cec is disabled and then reboot, you will find that
+the cec function is unavailable even you enable it again.
+The SYSTEM_CEC_CONTROL is not set when cec is disabled at first,
+then hal still treat it in standby state and reject messages.
+
+Solution:
+1.SetOption SYSTEM_CEC_CONTROL after the device boots.
+2.Allow <Report Physical Address> message when in standby.
+
+Verify:
+redi
+
+Change-Id: I56534bee72fc49d1f10b00c8ee452f540091eb48
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../java/com/android/server/hdmi/HdmiControlService.java | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+ mode change 100644 => 100755 services/core/java/com/android/server/hdmi/HdmiControlService.java
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiControlService.java b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+old mode 100644
+new mode 100755
+index 88093f863797..37197ba25940
+--- a/services/core/java/com/android/server/hdmi/HdmiControlService.java
++++ b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+@@ -531,9 +531,8 @@ public class HdmiControlService extends SystemService {
+         }
+         if (mCecController != null) {
+             mCecController.setOption(OptionKey.ENABLE_CEC, mHdmiControlEnabled);
+-            if (mHdmiControlEnabled) {
+-                initializeCec(INITIATED_BY_BOOT_UP);
+-            } else {
++            initializeCec(INITIATED_BY_BOOT_UP);
++            if (!mHdmiControlEnabled) {
+                 setActiveness(HdmiCecActiveness.CEC_DISABLED);
+             }
+         } else {
+@@ -839,6 +838,10 @@ public class HdmiControlService extends SystemService {
+     @ServiceThreadOnly
+     private void initializeLocalDevices(final int initiatedBy) {
+         assertRunOnServiceThread();
++        if (!mHdmiControlEnabled) {
++            HdmiLogger.info("initializeLocalDevices no need for cec disabled.");
++            return;
++        }
+         // A container for [Device type, Local device info].
+         ArrayList<HdmiCecLocalDevice> localDevices = new ArrayList<>();
+         for (int type : mLocalDevices) {
+-- 
+2.26.1
+
