@@ -1,4 +1,4 @@
-From e390d347482973384d077448df3efb3ccedae0eb Mon Sep 17 00:00:00 2001
+From 4f20d50b490879938f06e1a5566b8262f28fe948 Mon Sep 17 00:00:00 2001
 From: yuehu mi <yuehu.mi@amlogic.com>
 Date: Sat, 1 May 2021 14:36:58 +0800
 Subject: [PATCH] ueventd: the parallel restorecon dirs is configurable [1/1]
@@ -10,13 +10,8 @@ ueventd: coldboot took too much time
 
 Solution:
 1.The parallel restorecon dirs can be configured in ueventd.rc
-2.Add 'restorecon_dirs' keywords
-like this:
-restorecon_dirs    /sys
-3.During the boot process,
-dmesg will output the dirs whose restorecon takes more than 50ms
-like this:
-ueventd: took xxx ms restorecon dir
+2.Add 'parallel_restorecon_dirs' keywords
+parallel_restorecon_dirs <directory>
 
 Verify:
 redi
@@ -24,30 +19,42 @@ redi
 Change-Id: Id5b13f18d36afb894891697f21ac63e78b3fe130
 Signed-off-by: yuehu mi <yuehu.mi@amlogic.com>
 ---
- init/ueventd.cpp        | 46 ++++++++++++++++++++++++++++++++---------
- init/ueventd_parser.cpp | 15 ++++++++++++++
- init/ueventd_parser.h   |  1 +
- 3 files changed, 52 insertions(+), 10 deletions(-)
+ init/README.ueventd.md       | 10 ++++++++
+ init/ueventd.cpp             | 50 ++++++++++++++++++++++++++++--------
+ init/ueventd_parser.cpp      | 14 ++++++++++
+ init/ueventd_parser.h        |  1 +
+ init/ueventd_parser_test.cpp | 45 +++++++++++++++++++++++++-------
+ 5 files changed, 101 insertions(+), 19 deletions(-)
 
+diff --git a/init/README.ueventd.md b/init/README.ueventd.md
+index 053ebf813..51cd6acb5 100644
+--- a/init/README.ueventd.md
++++ b/init/README.ueventd.md
+@@ -136,3 +136,13 @@ be done for devices that do not use genfscon, which is the recommended method fo
+ nodes. To enable this option, use the below line in a ueventd.rc script:
+ 
+     parallel_restorecon enabled
++
++Do parallel restorecon to speed up boot process, subdirectories under `/sys`
++can be sliced by ueventd.rc, and run on multiple process.
++    parallel_restorecon_dir <directory>
++
++For example
++    parallel_restorecon_dir /sys
++    parallel_restorecon_dir /sys/devices
++    parallel_restorecon_dir /sys/devices/platform
++    parallel_restorecon_dir /sys/devices/platform/soc
 diff --git a/init/ueventd.cpp b/init/ueventd.cpp
-index d2b503b4f..9536326e4 100644
+index d2b503b4f..6c8423e46 100644
 --- a/init/ueventd.cpp
 +++ b/init/ueventd.cpp
-@@ -107,6 +107,8 @@
- // the uevent listener resumes in polling mode and will handle the uevents that occurred during
- // coldboot.
- 
-+#include <iomanip>
-+
- namespace android {
- namespace init {
- 
-@@ -114,11 +116,12 @@ class ColdBoot {
+@@ -114,11 +114,13 @@ class ColdBoot {
    public:
      ColdBoot(UeventListener& uevent_listener,
               std::vector<std::unique_ptr<UeventHandler>>& uevent_handlers,
 -             bool enable_parallel_restorecon)
-+             bool enable_parallel_restorecon, std::vector<std::string> parallel_restorecon_queue)
++             bool enable_parallel_restorecon,
++             std::vector<std::string> parallel_restorecon_queue)
          : uevent_listener_(uevent_listener),
            uevent_handlers_(uevent_handlers),
            num_handler_subprocesses_(std::thread::hardware_concurrency() ?: 4),
@@ -57,7 +64,7 @@ index d2b503b4f..9536326e4 100644
  
      void Run();
  
-@@ -141,6 +144,8 @@ class ColdBoot {
+@@ -141,6 +143,8 @@ class ColdBoot {
      std::set<pid_t> subprocess_pids_;
  
      std::vector<std::string> restorecon_queue_;
@@ -66,7 +73,7 @@ index d2b503b4f..9536326e4 100644
  };
  
  void ColdBoot::UeventHandlerMain(unsigned int process_num, unsigned int total_processes) {
-@@ -154,17 +159,31 @@ void ColdBoot::UeventHandlerMain(unsigned int process_num, unsigned int total_pr
+@@ -154,17 +158,34 @@ void ColdBoot::UeventHandlerMain(unsigned int process_num, unsigned int total_pr
  }
  
  void ColdBoot::RestoreConHandler(unsigned int process_num, unsigned int total_processes) {
@@ -78,14 +85,17 @@ index d2b503b4f..9536326e4 100644
  
          selinux_android_restorecon(dir.c_str(), SELINUX_ANDROID_RESTORECON_RECURSE);
 +
++        //Mark a dir restorecon operation for 50ms,
++        //Maybe you can add this dir to the ueventd.rc script to parallel processing
 +        if (t.duration() > 50ms) {
-+            LOG(INFO) << "took " << std::fixed << std::setprecision(3) << t.duration().count() / 1000.0f
-+                << "s restorecon dir=" << dir.c_str() << " process=" << process_num;
++            LOG(INFO) << "took " << t.duration().count() <<"ms restorecon '"
++                        << dir.c_str() << "' on process '" << process_num  <<"'";
 +        }
      }
 +
-+    LOG(INFO) << "process " << process_num << " took " << std::fixed << std::setprecision(3)
-+                << t_process.duration().count() / 1000.0f << "s";
++    //Calculate process restorecon time
++    LOG(VERBOSE) << "took " << t_process.duration().count() << "ms on process '"
++                << process_num  << "'";
  }
  
  void ColdBoot::GenerateRestoreCon(const std::string& directory) {
@@ -93,31 +103,25 @@ index d2b503b4f..9536326e4 100644
  
 -    if (!dir) return;
 +    if (!dir) {
-+        LOG(INFO) << "opendir " << directory.c_str() << " failed: No such directory";
++        PLOG(WARNING) << "opendir " << directory.c_str();
 +        return;
 +    }
  
      struct dirent* dent;
      while ((dent = readdir(dir.get())) != NULL) {
-@@ -174,8 +193,16 @@ void ColdBoot::GenerateRestoreCon(const std::string& directory) {
-         if (fstatat(dirfd(dir.get()), dent->d_name, &st, 0) == -1) continue;
+@@ -175,7 +196,10 @@ void ColdBoot::GenerateRestoreCon(const std::string& directory) {
  
          if (S_ISDIR(st.st_mode)) {
-+            unsigned int i;
              std::string fullpath = directory + "/" + dent->d_name;
 -            if (fullpath != "/sys/devices") {
-+
-+            for (i = 0; i < parallel_restorecon_queue_.size(); i++) {
-+                if (fullpath == parallel_restorecon_queue_[i].c_str()) {
-+                    break;
-+                }
-+            }
-+
-+            if (i == parallel_restorecon_queue_.size()) {
++            auto parallel_restorecon =
++                std::find(parallel_restorecon_queue_.begin(),
++                    parallel_restorecon_queue_.end(), fullpath);
++            if (parallel_restorecon == parallel_restorecon_queue_.end()) {
                  restorecon_queue_.emplace_back(fullpath);
              }
          }
-@@ -247,11 +274,10 @@ void ColdBoot::Run() {
+@@ -247,11 +271,16 @@ void ColdBoot::Run() {
      RegenerateUevents();
  
      if (enable_parallel_restorecon_) {
@@ -126,24 +130,31 @@ index d2b503b4f..9536326e4 100644
 -        GenerateRestoreCon("/sys");
 -        // takes long time for /sys/devices, parallelize it
 -        GenerateRestoreCon("/sys/devices");
-+        for (unsigned int i = 0; i < parallel_restorecon_queue_.size(); i++) {
-+            selinux_android_restorecon(parallel_restorecon_queue_[i].c_str(), 0);
-+            GenerateRestoreCon(parallel_restorecon_queue_[i].c_str());
++        if (parallel_restorecon_queue_.empty()) {
++            parallel_restorecon_queue_.emplace_back("/sys");
++            // takes long time for /sys/devices, parallelize it
++            parallel_restorecon_queue_.emplace_back("/sys/devices");
++            LOG(INFO) << "Parallel processing directory is not set, set the default";
++        }
++        for (const auto& dir : parallel_restorecon_queue_) {
++            selinux_android_restorecon(dir.c_str(), 0);
++            GenerateRestoreCon(dir);
 +        }
      }
  
      ForkSubProcesses();
-@@ -307,7 +333,7 @@ int ueventd_main(int argc, char** argv) {
+@@ -307,7 +336,8 @@ int ueventd_main(int argc, char** argv) {
  
      if (!android::base::GetBoolProperty(kColdBootDoneProp, false)) {
          ColdBoot cold_boot(uevent_listener, uevent_handlers,
 -                           ueventd_configuration.enable_parallel_restorecon);
-+                           ueventd_configuration.enable_parallel_restorecon, ueventd_configuration.parallel_restorecon_dirs);
++                           ueventd_configuration.enable_parallel_restorecon,
++                           ueventd_configuration.parallel_restorecon_dirs);
          cold_boot.Run();
      }
  
 diff --git a/init/ueventd_parser.cpp b/init/ueventd_parser.cpp
-index 09dce4481..bf10c652d 100644
+index 09dce4481..aa4efef93 100644
 --- a/init/ueventd_parser.cpp
 +++ b/init/ueventd_parser.cpp
 @@ -129,6 +129,17 @@ Result<void> ParseEnabledDisabledLine(std::vector<std::string>&& args, bool* fea
@@ -152,8 +163,8 @@ index 09dce4481..bf10c652d 100644
  
 +Result<void> ParseParallelRestoreconDirsLine(std::vector<std::string>&& args,
 +                                          std::vector<std::string>* parallel_restorecon_dirs) {
-+    if (args.size() < 2) {
-+        return Error() << "parallel_restorecon_dirs must have at least 1 entry";
++    if (args.size() != 2) {
++        return Error() << "parallel_restorecon_dir lines must have exactly 2 parameters";
 +    }
 +
 +    std::move(std::next(args.begin()), args.end(), std::back_inserter(*parallel_restorecon_dirs));
@@ -164,29 +175,165 @@ index 09dce4481..bf10c652d 100644
  Result<void> ParseUeventSocketRcvbufSizeLine(std::vector<std::string>&& args,
                                               size_t* uevent_socket_rcvbuf_size) {
      if (args.size() != 2) {
-@@ -248,6 +259,10 @@ UeventdConfiguration ParseConfig(const std::vector<std::string>& configs) {
+@@ -245,6 +256,9 @@ UeventdConfiguration ParseConfig(const std::vector<std::string>& configs) {
+     parser.AddSingleLineParser("uevent_socket_rcvbuf_size",
+                                std::bind(ParseUeventSocketRcvbufSizeLine, _1,
+                                          &ueventd_configuration.uevent_socket_rcvbuf_size));
++    parser.AddSingleLineParser("parallel_restorecon_dir",
++                               std::bind(ParseParallelRestoreconDirsLine, _1,
++                                         &ueventd_configuration.parallel_restorecon_dirs));
      parser.AddSingleLineParser("parallel_restorecon",
                                 std::bind(ParseEnabledDisabledLine, _1,
                                           &ueventd_configuration.enable_parallel_restorecon));
-+    parser.AddSingleLineParser("restorecon_dirs",
-+                               std::bind(ParseParallelRestoreconDirsLine, _1,
-+                                         &ueventd_configuration.parallel_restorecon_dirs));
-+
- 
-     for (const auto& config : configs) {
-         parser.ParseConfig(config);
 diff --git a/init/ueventd_parser.h b/init/ueventd_parser.h
-index eaafa5aa7..53f8e7852 100644
+index eaafa5aa7..81f4e9d54 100644
 --- a/init/ueventd_parser.h
 +++ b/init/ueventd_parser.h
-@@ -34,6 +34,7 @@ struct UeventdConfiguration {
+@@ -31,6 +31,7 @@ struct UeventdConfiguration {
+     std::vector<Permissions> dev_permissions;
+     std::vector<std::string> firmware_directories;
+     std::vector<ExternalFirmwareHandler> external_firmware_handlers;
++    std::vector<std::string> parallel_restorecon_dirs;
      bool enable_modalias_handling = false;
      size_t uevent_socket_rcvbuf_size = 0;
      bool enable_parallel_restorecon = false;
-+    std::vector<std::string> parallel_restorecon_dirs;
- };
+diff --git a/init/ueventd_parser_test.cpp b/init/ueventd_parser_test.cpp
+index 172ba0b38..c5237b933 100644
+--- a/init/ueventd_parser_test.cpp
++++ b/init/ueventd_parser_test.cpp
+@@ -67,6 +67,7 @@ void TestUeventdFile(const std::string& content, const UeventdConfiguration& exp
+     TestVector(expected.sysfs_permissions, result.sysfs_permissions, TestSysfsPermissions);
+     TestVector(expected.dev_permissions, result.dev_permissions, TestPermissions);
+     EXPECT_EQ(expected.firmware_directories, result.firmware_directories);
++    EXPECT_EQ(expected.parallel_restorecon_dirs, result.parallel_restorecon_dirs);
+ }
  
- UeventdConfiguration ParseConfig(const std::vector<std::string>& configs);
+ TEST(ueventd_parser, EmptyFile) {
+@@ -95,7 +96,7 @@ subsystem test_devpath_dirname
+             {"test_devname2", Subsystem::DEVNAME_UEVENT_DEVNAME, "/dev"},
+             {"test_devpath_dirname", Subsystem::DEVNAME_UEVENT_DEVPATH, "/dev/graphics"}};
+ 
+-    TestUeventdFile(ueventd_file, {subsystems, {}, {}, {}, {}});
++    TestUeventdFile(ueventd_file, {subsystems, {}, {}, {}, {}, {}});
+ }
+ 
+ TEST(ueventd_parser, Permissions) {
+@@ -121,7 +122,7 @@ TEST(ueventd_parser, Permissions) {
+             {"/sys/devices/virtual/*/input", "poll_delay", 0660, AID_ROOT, AID_INPUT},
+     };
+ 
+-    TestUeventdFile(ueventd_file, {{}, sysfs_permissions, permissions, {}, {}});
++    TestUeventdFile(ueventd_file, {{}, sysfs_permissions, permissions, {}, {}, {}});
+ }
+ 
+ TEST(ueventd_parser, FirmwareDirectories) {
+@@ -137,7 +138,7 @@ firmware_directories /more
+             "/more",
+     };
+ 
+-    TestUeventdFile(ueventd_file, {{}, {}, {}, firmware_directories, {}});
++    TestUeventdFile(ueventd_file, {{}, {}, {}, firmware_directories, {}, {}});
+ }
+ 
+ TEST(ueventd_parser, ExternalFirmwareHandlers) {
+@@ -165,7 +166,7 @@ external_firmware_handler /devices/path/firmware/something001.bin radio "/vendor
+             },
+     };
+ 
+-    TestUeventdFile(ueventd_file, {{}, {}, {}, {}, external_firmware_handlers});
++    TestUeventdFile(ueventd_file, {{}, {}, {}, {}, external_firmware_handlers, {}});
+ }
+ 
+ TEST(ueventd_parser, ExternalFirmwareHandlersDuplicate) {
+@@ -182,7 +183,21 @@ external_firmware_handler devpath root handler_path2
+             },
+     };
+ 
+-    TestUeventdFile(ueventd_file, {{}, {}, {}, {}, external_firmware_handlers});
++    TestUeventdFile(ueventd_file, {{}, {}, {}, {}, external_firmware_handlers, {}});
++}
++
++TEST(ueventd_parser, ParallelRestoreconDirs) {
++    auto ueventd_file = R"(
++parallel_restorecon_dir /sys
++parallel_restorecon_dir /sys/devices
++)";
++
++    auto parallel_restorecon_dirs = std::vector<std::string>{
++            "/sys",
++            "/sys/devices",
++    };
++
++    TestUeventdFile(ueventd_file, {{}, {}, {}, {}, {}, parallel_restorecon_dirs});
+ }
+ 
+ TEST(ueventd_parser, UeventSocketRcvbufSize) {
+@@ -191,7 +206,7 @@ uevent_socket_rcvbuf_size 8k
+ uevent_socket_rcvbuf_size 8M
+ )";
+ 
+-    TestUeventdFile(ueventd_file, {{}, {}, {}, {}, {}, false, 8 * 1024 * 1024});
++    TestUeventdFile(ueventd_file, {{}, {}, {}, {}, {}, {}, false, 8 * 1024 * 1024});
+ }
+ 
+ TEST(ueventd_parser, EnabledDisabledLines) {
+@@ -201,7 +216,7 @@ parallel_restorecon enabled
+ modalias_handling disabled
+ )";
+ 
+-    TestUeventdFile(ueventd_file, {{}, {}, {}, {}, {}, false, 0, true});
++    TestUeventdFile(ueventd_file, {{}, {}, {}, {}, {}, {}, false, 0, true});
+ 
+     auto ueventd_file2 = R"(
+ parallel_restorecon enabled
+@@ -209,7 +224,7 @@ modalias_handling enabled
+ parallel_restorecon disabled
+ )";
+ 
+-    TestUeventdFile(ueventd_file2, {{}, {}, {}, {}, {}, true, 0, false});
++    TestUeventdFile(ueventd_file2, {{}, {}, {}, {}, {}, {}, true, 0, false});
+ }
+ 
+ TEST(ueventd_parser, AllTogether) {
+@@ -249,6 +264,9 @@ uevent_socket_rcvbuf_size 6M
+ modalias_handling enabled
+ parallel_restorecon enabled
+ 
++parallel_restorecon_dir /sys
++parallel_restorecon_dir /sys/devices
++
+ #ending comment
+ )";
+ 
+@@ -281,11 +299,17 @@ parallel_restorecon enabled
+             {"/devices/path/firmware/firmware001.bin", AID_ROOT, "/vendor/bin/touch.sh"},
+     };
+ 
++    auto parallel_restorecon_dirs = std::vector<std::string>{
++            "/sys",
++            "/sys/devices",
++    };
++
+     size_t uevent_socket_rcvbuf_size = 6 * 1024 * 1024;
+ 
+     TestUeventdFile(ueventd_file,
+                     {subsystems, sysfs_permissions, permissions, firmware_directories,
+-                     external_firmware_handlers, true, uevent_socket_rcvbuf_size, true});
++                     external_firmware_handlers, parallel_restorecon_dirs, true,
++                     uevent_socket_rcvbuf_size, true});
+ }
+ 
+ // All of these lines are ill-formed, so test that there is 0 output.
+@@ -316,6 +340,9 @@ external_firmware_handler
+ external_firmware_handler blah blah
+ external_firmware_handler blah blah blah blah
+ 
++parallel_restorecon_dir
++parallel_restorecon_dir /sys /sys/devices
++
+ )";
+ 
+     TestUeventdFile(ueventd_file, {});
 -- 
 2.29.0
 
