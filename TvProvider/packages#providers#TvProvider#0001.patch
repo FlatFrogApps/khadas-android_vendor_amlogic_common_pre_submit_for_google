@@ -1,0 +1,44 @@
+From 40878c66d15d37ed7f3c83f793d5dbb7db2a6fd7 Mon Sep 17 00:00:00 2001
+From: kieth liu <kieth.liu@amlogic.com>
+Date: Wed, 9 Jun 2021 10:34:42 +0800
+Subject: [PATCH] TvProvider: Optimize notifyChange [1/1]
+
+PD#SWPL-52003
+
+Problem:
+many tv Provider onChange for dvb
+player that time consuming
+
+Solution:
+rm every Uri change need target notifyChange
+in applyBatch, need notifyChange when all Uri
+update finished
+
+Verify:
+ok on redi.
+
+Change-Id: I389353ed4d9fb552ed983e48c8539239a57772ff
+Signed-off-by: kieth liu <kieth.liu@amlogic.com>
+---
+ src/com/android/providers/tv/TvProvider.java | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/src/com/android/providers/tv/TvProvider.java b/src/com/android/providers/tv/TvProvider.java
+index d49d387..ba0e2a8 100644
+--- a/src/com/android/providers/tv/TvProvider.java
++++ b/src/com/android/providers/tv/TvProvider.java
+@@ -1994,11 +1994,6 @@ public class TvProvider extends ContentProvider {
+             return results;
+         } finally {
+             db.endTransaction();
+-            final Set<Uri> notifications = getBatchNotificationsSet();
+-            setBatchNotificationsSet(null);
+-            for (final Uri uri : notifications) {
+-                context.getContentResolver().notifyChange(uri, null);
+-            }
+         }
+     }
+ 
+-- 
+2.17.1
+
