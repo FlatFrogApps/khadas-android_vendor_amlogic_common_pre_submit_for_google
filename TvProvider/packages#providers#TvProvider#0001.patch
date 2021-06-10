@@ -1,9 +1,7 @@
-From 40878c66d15d37ed7f3c83f793d5dbb7db2a6fd7 Mon Sep 17 00:00:00 2001
+From b42744b629aa721b88b9522e507f612d5198caff Mon Sep 17 00:00:00 2001
 From: kieth liu <kieth.liu@amlogic.com>
-Date: Wed, 9 Jun 2021 10:34:42 +0800
-Subject: [PATCH] TvProvider: Optimize notifyChange [1/1]
-
-PD#SWPL-52003
+Date: Thu, 10 Jun 2021 21:34:04 +0800
+Subject: [PATCH] PD#SWPL-52003
 
 Problem:
 many tv Provider onChange for dvb
@@ -17,22 +15,22 @@ update finished
 Verify:
 ok on redi.
 
-Change-Id: I389353ed4d9fb552ed983e48c8539239a57772ff
+Change-Id: Iddbb2ff5ddcb574064f53bc8a122016ef39c5bb3
 Signed-off-by: kieth liu <kieth.liu@amlogic.com>
 ---
- src/com/android/providers/tv/TvProvider.java | 5 -----
- 1 file changed, 5 deletions(-)
+ src/com/android/providers/tv/TvProvider.java | 4 ----
+ 1 file changed, 4 deletions(-)
 
 diff --git a/src/com/android/providers/tv/TvProvider.java b/src/com/android/providers/tv/TvProvider.java
-index d49d387..ba0e2a8 100644
+index d49d387..7e6d95f 100644
 --- a/src/com/android/providers/tv/TvProvider.java
 +++ b/src/com/android/providers/tv/TvProvider.java
-@@ -1994,11 +1994,6 @@ public class TvProvider extends ContentProvider {
+@@ -1994,11 +1994,7 @@ public class TvProvider extends ContentProvider {
              return results;
          } finally {
              db.endTransaction();
 -            final Set<Uri> notifications = getBatchNotificationsSet();
--            setBatchNotificationsSet(null);
+             setBatchNotificationsSet(null);
 -            for (final Uri uri : notifications) {
 -                context.getContentResolver().notifyChange(uri, null);
 -            }
@@ -40,5 +38,5 @@ index d49d387..ba0e2a8 100644
      }
  
 -- 
-2.17.1
+2.29.0
 
