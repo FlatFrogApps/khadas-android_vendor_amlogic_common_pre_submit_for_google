@@ -1,0 +1,39 @@
+From fcaccc8529d2d45695ee5016027c9d45a6e8a8d9 Mon Sep 17 00:00:00 2001
+From: kieth liu <kieth.liu@amlogic.com>
+Date: Fri, 11 Jun 2021 13:55:59 +0800
+Subject: [PATCH] TvProvider: rm cheduleEpgDataCleanup [1/1]
+
+PD#SWPL-40256
+
+Problem:
+The EPG will clean if time out of 14 days
+
+Solution:
+rm cheduleEpgDataCleanup in TvProvider,
+DVB stack will handle it
+
+Verify:
+ok on redi.
+
+Change-Id: Ib2f2dc5905ef1db1e021491f2ac7f535a789c8a2
+Signed-off-by: kieth liu <kieth.liu@amlogic.com>
+---
+ src/com/android/providers/tv/TvProvider.java | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/com/android/providers/tv/TvProvider.java b/src/com/android/providers/tv/TvProvider.java
+index d49d387..58b8172 100644
+--- a/src/com/android/providers/tv/TvProvider.java
++++ b/src/com/android/providers/tv/TvProvider.java
+@@ -1069,7 +1069,7 @@ public class TvProvider extends ContentProvider {
+             mOpenHelper = DatabaseHelper.getInstance(getContext());
+         }
+         mTransientRowHelper = TransientRowHelper.getInstance(getContext());
+-        scheduleEpgDataCleanup();
++        //scheduleEpgDataCleanup();
+         buildGenreMap();
+ 
+         // DB operation, which may trigger upgrade, should not happen in onCreate.
+-- 
+2.29.0
+
