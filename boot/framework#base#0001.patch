@@ -1,0 +1,72 @@
+From c5afbb661f3eadb2e96e5e0b0c4bbdab321a149f Mon Sep 17 00:00:00 2001
+From: Yan Fang1 <yan.fang1@amlogic.com>
+Date: Fri, 18 Jun 2021 13:06:53 +0800
+Subject: [PATCH] boot: speed up booting, remove useless module [1/1]
+
+PD#
+
+Problem:
+need speedup and upgrade thread priority
+
+Solution:
+upgrade thread priority
+
+Verify:
+can speed up about 2s.
+
+Change-Id: Ie23605c7ca4b350d27355879fc001eeab0a4b48e
+Signed-off-by: Yan Fang1 <yan.fang1@amlogic.com>
+---
+ .../com/android/server/SystemServerInitThreadPool.java    | 2 +-
+ services/java/com/android/server/SystemServer.java        | 8 +++++---
+ 2 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/services/core/java/com/android/server/SystemServerInitThreadPool.java b/services/core/java/com/android/server/SystemServerInitThreadPool.java
+index c0611374679b..2ce9e64d6c9c 100644
+--- a/services/core/java/com/android/server/SystemServerInitThreadPool.java
++++ b/services/core/java/com/android/server/SystemServerInitThreadPool.java
+@@ -65,7 +65,7 @@ public class SystemServerInitThreadPool {
+         final int size = Runtime.getRuntime().availableProcessors();
+         Slog.i(TAG, "Creating instance with " + size + " threads");
+         mService = ConcurrentUtils.newFixedThreadPool(size,
+-                "system-server-init-thread", Process.THREAD_PRIORITY_FOREGROUND);
++                "system-server-init-thread", -18);//Process.THREAD_PRIORITY_FOREGROUND);
+     }
+ 
+     /**
+diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
+index 88e698121617..56d3b8850f4c 100644
+--- a/services/java/com/android/server/SystemServer.java
++++ b/services/java/com/android/server/SystemServer.java
+@@ -436,6 +436,7 @@ public final class SystemServer {
+     private void run() {
+         TimingsTraceAndSlog t = new TimingsTraceAndSlog();
+         try {
++            android.os.Process.setThreadPriority(-19);
+             t.traceBegin("InitBeforeStartServices");
+ 
+             // Record the process start information in sys props.
+@@ -528,8 +529,8 @@ public final class SystemServer {
+             BinderInternal.setMaxThreads(sMaxBinderThreads);
+ 
+             // Prepare the main looper thread (this thread).
+-            android.os.Process.setThreadPriority(
+-                    android.os.Process.THREAD_PRIORITY_FOREGROUND);
++            //android.os.Process.setThreadPriority(
++            //        android.os.Process.THREAD_PRIORITY_FOREGROUND);
+             android.os.Process.setCanSelfBackground(false);
+             Looper.prepareMainLooper();
+             Looper.getMainLooper().setSlowLogThresholdMs(
+@@ -623,7 +624,8 @@ public final class SystemServer {
+         if (!VMRuntime.hasBootImageSpaces()) {
+             Slog.wtf(TAG, "Runtime is not running with a boot image!");
+         }
+-
++        android.os.Process.setThreadPriority(
++            android.os.Process.THREAD_PRIORITY_FOREGROUND);
+         // Loop forever.
+         Looper.loop();
+         throw new RuntimeException("Main thread loop unexpectedly exited");
+-- 
+2.25.1
+
