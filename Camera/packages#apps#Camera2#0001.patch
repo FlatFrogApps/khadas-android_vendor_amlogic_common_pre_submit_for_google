@@ -977,7 +977,7 @@ index c2e060a1e..dc6ce566c 100644
              preference.setEntries(entries.toArray(new String[0]));
 +            preference.setEntryValues(resultValues.toArray(new String[0]));
 +            int selectedQuality = selectedQualities.getFromSetting(preference.getValue());
-+            if (!validInSelected(selectedQuality, selectedQualities))
++            if (!validInSelected(selectedQuality, selectedQualities) && (resultValues.size() > 0))
 +                preference.setValue((String)resultValues.get(0));
          }
  
