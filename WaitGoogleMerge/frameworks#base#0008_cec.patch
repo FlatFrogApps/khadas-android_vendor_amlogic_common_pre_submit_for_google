@@ -1,0 +1,387 @@
+From ba62320a336df73fff5c1a5235600ad7153df538 Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Wed, 30 Jun 2021 16:21:06 +0800
+Subject: [PATCH] cec: make sure tv and avr's volume is in accord [1/1]
+
+PD#SWPL-53443
+
+Problem:
+1.Tv's volume may not be in accord with avr's.
+2.send otp in quiescent mode.(SWPL-53867)
+3.fail to connect arc for earc avrs.(SWPL-52813)
+
+Solution:
+1.Send all volume keyevents to the avr, Only update
+the volume triggered by volume keyevents when the
+volume is max or mute.
+2.not send otp when it's quiescent boot.
+3.abandon the connection condition of arc port.
+
+Verify:
+redi
+
+Change-Id: I96825dc10e0849f80cc99fa2c1a648cc1dd87b48
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../hdmi/HdmiCecLocalDevicePlayback.java      | 25 +++++---
+ .../server/hdmi/HdmiCecLocalDeviceTv.java     | 20 ++++--
+ .../android/server/hdmi/RequestArcAction.java | 28 ++++++++-
+ .../hdmi/RequestArcInitiationAction.java      | 13 +---
+ .../hdmi/SetArcTransmissionStateAction.java   |  3 +-
+ .../server/hdmi/SystemAudioAction.java        |  5 ++
+ .../server/hdmi/VolumeControlAction.java      | 63 +++++++------------
+ 7 files changed, 88 insertions(+), 69 deletions(-)
+ mode change 100644 => 100755 services/core/java/com/android/server/hdmi/VolumeControlAction.java
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
+index 60578a258f0c..3382076331f7 100755
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
+@@ -46,6 +46,9 @@ public class HdmiCecLocalDevicePlayback extends HdmiCecLocalDeviceSource {
+ 
+     private static final boolean SET_MENU_LANGUAGE =
+             HdmiProperties.set_menu_language().orElse(false);
++    // System property indicating that the screen should remain off until an explicit user action
++    private static final String SYSTEM_PROPERTY_QUIESCENT = "ro.boot.quiescent";
++    private boolean mQuiescent;
+ 
+     // Used to keep the device awake while it is the active source. For devices that
+     // cannot wake up via CEC commands, this address the inconvenience of having to
+@@ -74,6 +77,7 @@ public class HdmiCecLocalDevicePlayback extends HdmiCecLocalDeviceSource {
+ 
+     HdmiCecLocalDevicePlayback(HdmiControlService service) {
+         super(service, HdmiDeviceInfo.DEVICE_PLAYBACK);
++        mQuiescent = SystemProperties.get(SYSTEM_PROPERTY_QUIESCENT, "0").equals("1");
+ 
+         mAutoTvOff = mService.readBooleanSetting(Global.HDMI_CONTROL_AUTO_DEVICE_OFF_ENABLED, true);
+ 
+@@ -137,15 +141,20 @@ public class HdmiCecLocalDevicePlayback extends HdmiCecLocalDeviceSource {
+                     });
+         }
+         if (reason == mService.INITIATED_BY_BOOT_UP) {
+-            Slog.d(TAG, "Trigger one touch play after boot!");
+-            oneTouchPlay(new IHdmiControlCallback.Stub() {
+-                @Override
+-                public void onComplete(int result) {
+-                    if (result != HdmiControlManager.RESULT_SUCCESS) {
+-                        Slog.w(TAG, "One touch play failed: " + result);
++            if (mQuiescent) {
++                mQuiescent = false;
++                Slog.d(TAG, "no one touch play for quiescent boot.");
++            } else {
++                Slog.d(TAG, "Trigger one touch play after boot!");
++                oneTouchPlay(new IHdmiControlCallback.Stub() {
++                    @Override
++                    public void onComplete(int result) {
++                        if (result != HdmiControlManager.RESULT_SUCCESS) {
++                            Slog.w(TAG, "One touch play failed: " + result);
++                        }
+                     }
+-                }
+-            });
++                });
++            }
+         }
+         startQueuedActions();
+     }
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+index 3d3d60ab459c..d47f95113ad2 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+@@ -887,8 +887,8 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+         }
+         HdmiDeviceInfo avr = getAvrDeviceInfo();
+         if (!isConnectedToArcDevice(avr)) {
+-            HdmiLogger.info("audio system device is not ready!");
+-            resetAudioStatus();
++            HdmiLogger.info("audio system device is not ready.");
++
+             return;
+         }
+         HdmiLogger.info("System Audio Mode change[old:%b new:%b]",
+@@ -907,7 +907,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+             || avr.getPortId() != mService.getArcPortId()) {
+             return false;
+         }
+-        return mService.isConnected(avr.getPortId());
++        return true;
+     }
+ 
+     void resetAudioStatus() {
+@@ -1174,6 +1174,12 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+     @ServiceThreadOnly
+     protected boolean handleInitiateArc(HdmiCecMessage message) {
+         assertRunOnServiceThread();
++        if (!isSystemAudioControlFeatureEnabled()) {
++            HdmiLogger.info("Ignoring <Init Arc> message "
++                    + "because the Arc feature is disabled: %s", message);
++            mService.maySendFeatureAbortCommand(message, Constants.ABORT_REFUSED);
++            return true;
++        }
+ 
+         if (!canStartArcUpdateAction(message.getSource(), true)) {
+             HdmiDeviceInfo avrDeviceInfo = getAvrDeviceInfo();
+@@ -1270,6 +1276,12 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+             // Ignore this message.
+             return true;
+         }
++        if (!isSystemAudioControlFeatureEnabled()) {
++            HdmiLogger.info("Ignoring <System Audio Mode Status> message "
++                    + "because the System Audio Control feature is disabled: %s", message);
++            mService.maySendFeatureAbortCommand(message, Constants.ABORT_REFUSED);
++            return true;
++        }
+         setSystemAudioMode(HdmiUtils.parseCommandParamSystemAudioStatus(message));
+         return true;
+     }
+@@ -1764,7 +1776,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+     private void disableArcIfExist() {
+         assertRunOnServiceThread();
+         HdmiDeviceInfo avr = getAvrDeviceInfo();
+-        if (!isConnectedToArcDevice(avr)) {
++        if (!isConnectedToArcDevice(getAvrDeviceInfo())) {
+             return;
+         }
+ 
+diff --git a/services/core/java/com/android/server/hdmi/RequestArcAction.java b/services/core/java/com/android/server/hdmi/RequestArcAction.java
+index 94910afbd51c..1a7e7266cb5c 100644
+--- a/services/core/java/com/android/server/hdmi/RequestArcAction.java
++++ b/services/core/java/com/android/server/hdmi/RequestArcAction.java
+@@ -17,6 +17,7 @@
+ package com.android.server.hdmi;
+ 
+ import android.hardware.hdmi.HdmiDeviceInfo;
++import android.hardware.tv.cec.V1_0.SendMessageResult;
+ 
+ /**
+  * Base feature action class for &lt;Request ARC Initiation&gt;/&lt;Request ARC Termination&gt;.
+@@ -63,9 +64,15 @@ abstract class RequestArcAction extends HdmiCecFeatureAction {
+                     finish();
+                     return true;
+                 } else if (originalOpcode == Constants.MESSAGE_REQUEST_ARC_INITIATION) {
+-                    tv().setArcStatus(false);
+-                    finish();
+-                    return true;
++                    // We should not turn off arc when the init arc message is not sent
++                    // or even the audio system reponds with Feature Abort.
++                    int abortCode = cmd.getParams()[1] & 0xFF;
++                    if (abortCode != Constants.ABORT_UNRECOGNIZED_OPCODE) {
++                        HdmiLogger.info("arc initiation retry for avr is not ready.");
++                        sendRequestArcInitiation();
++                        return true;
++                    }
++                    return false;
+                 }
+                 return false;
+         }
+@@ -79,6 +86,21 @@ abstract class RequestArcAction extends HdmiCecFeatureAction {
+         addAndStartAction(action);
+     }
+ 
++    protected final void sendRequestArcInitiation() {
++        HdmiCecMessage command = HdmiCecMessageBuilder.buildRequestArcInitiation(
++            getSourceAddress(), mAvrAddress);
++        sendCommand(command, new HdmiControlService.SendMessageCallback() {
++            @Override
++            public void onSendCompleted(int error) {
++                if (error != SendMessageResult.SUCCESS) {
++                    // Turn off ARC status if <Request ARC Initiation> fails.
++                    tv().setArcStatus(false);
++                    finish();
++                }
++            }
++        });
++    }
++
+     @Override
+     void handleTimerEvent(int state) {
+         if (mState != state || state != STATE_WATING_FOR_REQUEST_ARC_REQUEST_RESPONSE) {
+diff --git a/services/core/java/com/android/server/hdmi/RequestArcInitiationAction.java b/services/core/java/com/android/server/hdmi/RequestArcInitiationAction.java
+index 4eb220fd65ee..f5360c6e3bf4 100644
+--- a/services/core/java/com/android/server/hdmi/RequestArcInitiationAction.java
++++ b/services/core/java/com/android/server/hdmi/RequestArcInitiationAction.java
+@@ -41,18 +41,7 @@ final class RequestArcInitiationAction extends RequestArcAction {
+         mState = STATE_WATING_FOR_REQUEST_ARC_REQUEST_RESPONSE;
+         addTimer(mState, HdmiConfig.TIMEOUT_MS);
+ 
+-        HdmiCecMessage command = HdmiCecMessageBuilder.buildRequestArcInitiation(
+-                getSourceAddress(), mAvrAddress);
+-        sendCommand(command, new HdmiControlService.SendMessageCallback() {
+-            @Override
+-            public void onSendCompleted(int error) {
+-                if (error != SendMessageResult.SUCCESS) {
+-                    // Turn off ARC status if <Request ARC Initiation> fails.
+-                    tv().setArcStatus(false);
+-                    finish();
+-                }
+-            }
+-        });
++        sendRequestArcInitiation();
+         return true;
+     }
+ }
+diff --git a/services/core/java/com/android/server/hdmi/SetArcTransmissionStateAction.java b/services/core/java/com/android/server/hdmi/SetArcTransmissionStateAction.java
+index de0a30c35858..405a19e0f153 100644
+--- a/services/core/java/com/android/server/hdmi/SetArcTransmissionStateAction.java
++++ b/services/core/java/com/android/server/hdmi/SetArcTransmissionStateAction.java
+@@ -53,6 +53,7 @@ final class SetArcTransmissionStateAction extends HdmiCecFeatureAction {
+ 
+     @Override
+     boolean start() {
++        HdmiLogger.debug("SetArcTransmissionStateAction start " + mEnabled);
+         // Seq #37.
+         if (mEnabled) {
+             // Enable ARC status immediately before sending <Report Arc Initiated>.
+@@ -93,7 +94,7 @@ final class SetArcTransmissionStateAction extends HdmiCecFeatureAction {
+                         // If <Report ARC Initiated> is negatively ack'ed, disable ARC and
+                         // send <Report ARC Terminated> directly.
+                         setArcStatus(false);
+-                        HdmiLogger.error("Failed to send <Report Arc Initiated>.");
++                        HdmiLogger.debug("Failed to send <Report Arc Initiated>.");
+                         finish();
+                         break;
+                 }
+diff --git a/services/core/java/com/android/server/hdmi/SystemAudioAction.java b/services/core/java/com/android/server/hdmi/SystemAudioAction.java
+index 49a41d93cb59..af9fb5d74d42 100644
+--- a/services/core/java/com/android/server/hdmi/SystemAudioAction.java
++++ b/services/core/java/com/android/server/hdmi/SystemAudioAction.java
+@@ -77,6 +77,11 @@ abstract class SystemAudioAction extends HdmiCecFeatureAction {
+     }
+ 
+     private void sendSystemAudioModeRequestInternal() {
++        if (!tv().isSystemAudioControlFeatureEnabled()) {
++            HdmiLogger.debug("Ignoring <System Audio Mode Request> message "
++                    + "because the System Audio Control feature is disabled.");
++            return;
++        }
+         HdmiCecMessage command = HdmiCecMessageBuilder.buildSystemAudioModeRequest(
+                 getSourceAddress(),
+                 mAvrLogicalAddress, getSystemAudioModeRequestParam(), mTargetAudioStatus);
+diff --git a/services/core/java/com/android/server/hdmi/VolumeControlAction.java b/services/core/java/com/android/server/hdmi/VolumeControlAction.java
+old mode 100644
+new mode 100755
+index f809129331aa..c34918814cdf
+--- a/services/core/java/com/android/server/hdmi/VolumeControlAction.java
++++ b/services/core/java/com/android/server/hdmi/VolumeControlAction.java
+@@ -19,9 +19,8 @@ package com.android.server.hdmi;
+ import static com.android.server.hdmi.Constants.MESSAGE_FEATURE_ABORT;
+ import static com.android.server.hdmi.Constants.MESSAGE_REPORT_AUDIO_STATUS;
+ import static com.android.server.hdmi.Constants.MESSAGE_USER_CONTROL_PRESSED;
+-import static com.android.server.hdmi.HdmiConfig.IRT_MS;
++import static com.android.server.hdmi.HdmiConfig.TIMEOUT_MS;
+ 
+-import android.hardware.tv.cec.V1_0.SendMessageResult;
+ import android.media.AudioManager;
+ 
+ /**
+@@ -42,8 +41,6 @@ final class VolumeControlAction extends HdmiCecFeatureAction {
+ 
+     private static final int UNKNOWN_AVR_VOLUME = -1;
+ 
+-    private static final int FILTER_REPORT_AUDIO_STATUS_TIME = 4000;
+-
+     private final int mAvrAddress;
+     private boolean mIsVolumeUp;
+     private long mLastKeyUpdateTime;
+@@ -86,11 +83,6 @@ final class VolumeControlAction extends HdmiCecFeatureAction {
+         mLastKeyUpdateTime = System.currentTimeMillis();
+     }
+ 
+-    private boolean checkVolumeKeyInterval() {
+-        long interval = System.currentTimeMillis() - mLastKeyUpdateTime;
+-        return interval > IRT_MS;
+-    }
+-
+     @Override
+     boolean start() {
+         mState = STATE_WAIT_FOR_NEXT_VOLUME_PRESS;
+@@ -99,42 +91,23 @@ final class VolumeControlAction extends HdmiCecFeatureAction {
+     }
+ 
+     private void sendVolumeKeyPressed() {
+-        int keycode = mIsVolumeUp ? HdmiCecKeycode.CEC_KEYCODE_VOLUME_UP
+-                        : HdmiCecKeycode.CEC_KEYCODE_VOLUME_DOWN;
+-        HdmiLogger.debug("Volume Control send volume key event " + mIsVolumeUp);
+-        sendCommand(HdmiCecMessageBuilder.buildUserControlPressed(getSourceAddress(), mAvrAddress, keycode),
+-            error -> {
+-                if (error == SendMessageResult.SUCCESS) {
+-                    HdmiLogger.debug("send key event over");
+-                    updateLastKeyUpdateTime();
+-                    resetTimer();
+-                }
+-            });
+-        // Update audio system's volume and no need to update the volume from audio system again.
+-        //sendCommand(HdmiCecMessageBuilder.buildGiveAudioStatus(getSourceAddress(), mAvrAddress));
++        sendCommand(HdmiCecMessageBuilder.buildUserControlPressed(getSourceAddress(), mAvrAddress,
++                mIsVolumeUp ? HdmiCecKeycode.CEC_KEYCODE_VOLUME_UP
++                        : HdmiCecKeycode.CEC_KEYCODE_VOLUME_DOWN));
+         mSentKeyPressed = true;
++
++        resetTimer();
+     }
+ 
+     private void resetTimer() {
+         mActionTimer.clearTimerMessage();
+-        addTimer(STATE_WAIT_FOR_NEXT_VOLUME_PRESS, FILTER_REPORT_AUDIO_STATUS_TIME);
++        addTimer(STATE_WAIT_FOR_NEXT_VOLUME_PRESS, TIMEOUT_MS * 2);
+     }
+ 
+     void handleVolumeChange(boolean isVolumeUp) {
+-        if (mIsVolumeUp != isVolumeUp) {
+-            HdmiLogger.debug("Volume Key Status Changed[old:%b new:%b]", mIsVolumeUp, isVolumeUp);
+-            mIsVolumeUp = isVolumeUp;
+-            sendVolumeKeyReleased();
+-            sendVolumeKeyPressed();
+-        } else if (checkVolumeKeyInterval()) {
+-            sendVolumeKeyPressed();
+-        }
+-    }
+-
+-    private void sendVolumeKeyReleased() {
+-        sendCommand(HdmiCecMessageBuilder.buildUserControlReleased(
+-                getSourceAddress(), mAvrAddress));
+-        mSentKeyPressed = false;
++        HdmiLogger.debug("Volume Key Status Changed[old:%b new:%b]", mIsVolumeUp, isVolumeUp);
++        mIsVolumeUp = isVolumeUp;
++        sendVolumeKeyPressed();
+     }
+ 
+     @Override
+@@ -158,15 +131,13 @@ final class VolumeControlAction extends HdmiCecFeatureAction {
+         int volume = HdmiUtils.getAudioStatusVolume(cmd);
+         mLastAvrVolume = volume;
+         mLastAvrMute = mute;
+-        HdmiLogger.debug("not update system volume after send volume key to audio system");
+-        /*
++        HdmiLogger.debug("Force volume change[mute:%b, volume=%d]", mute, volume);
+         if (shouldUpdateAudioVolume(mute)) {
+-            HdmiLogger.debug("Force volume change[mute:%b, volume=%d]", mute, volume);
++            HdmiLogger.info("Update TV's volume to be in accord with the avr");
+             tv().setAudioStatus(mute, volume);
+             mLastAvrVolume = UNKNOWN_AVR_VOLUME;
+             mLastAvrMute = false;
+         }
+-        */
+         return true;
+     }
+ 
+@@ -199,6 +170,16 @@ final class VolumeControlAction extends HdmiCecFeatureAction {
+         return false;
+     }
+ 
++    @Override
++    protected void clear() {
++        super.clear();
++        if (mLastAvrVolume != UNKNOWN_AVR_VOLUME) {
++            tv().setAudioStatus(mLastAvrMute, mLastAvrVolume);
++            mLastAvrVolume = UNKNOWN_AVR_VOLUME;
++            mLastAvrMute = false;
++        }
++    }
++
+     @Override
+     void handleTimerEvent(int state) {
+         if (state != STATE_WAIT_FOR_NEXT_VOLUME_PRESS) {
+-- 
+2.26.1
+
