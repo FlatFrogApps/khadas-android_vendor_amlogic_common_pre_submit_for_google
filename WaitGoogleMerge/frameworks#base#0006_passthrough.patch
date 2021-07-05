@@ -1,0 +1,52 @@
+From 0fca82c97a698bce0a512036af42a8b57456282a Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Mon, 5 Jul 2021 11:03:45 +0800
+Subject: [PATCH] cec: no send mute keys if the caller is not android [1/1]
+
+PD#SWPL-54046
+
+Problem:
+google assist app katniss may mute the system in dolby format
+when device goes to sleep, while unmute in none dolby format.
+
+Solution:
+If the caller is not android, then only send volume keyevents
+when it's not mute key.
+
+Verify:
+redi
+
+Change-Id: I53e26d10b4c3eceab48c1424212988dd41b26dcd
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../core/java/com/android/server/audio/AudioService.java   | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/services/core/java/com/android/server/audio/AudioService.java b/services/core/java/com/android/server/audio/AudioService.java
+index 8e55ab06ca54..2b838df41a58 100644
+--- a/services/core/java/com/android/server/audio/AudioService.java
++++ b/services/core/java/com/android/server/audio/AudioService.java
+@@ -2227,8 +2227,10 @@ public class AudioService extends IAudioService.Stub
+             adjustVolume = false;
+         }
+         int oldIndex = mStreamStates[streamType].getIndex(device);
+-        synchronized (mHdmiClientLock) {
+-            passthroughToTv(streamType, direction, oldIndex, oldIndex, keyEventMode);
++        if ("WindowManager".equals(caller) || !isMuteAdjust) {
++            synchronized (mHdmiClientLock) {
++                passthroughToTv(streamType, direction, oldIndex, oldIndex, keyEventMode);
++            }
+         }
+ 
+         if (adjustVolume
+@@ -7416,6 +7418,7 @@ public class AudioService extends IAudioService.Stub
+                     keyCode = KeyEvent.KEYCODE_VOLUME_DOWN;
+                     break;
+                 case AudioManager.ADJUST_MUTE:
++                case AudioManager.ADJUST_UNMUTE:
+                 case AudioManager.ADJUST_TOGGLE_MUTE:
+                     keyCode = KeyEvent.KEYCODE_VOLUME_MUTE;
+                     break;
+-- 
+2.26.1
+
