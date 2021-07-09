@@ -1,9 +1,9 @@
-From c5afbb661f3eadb2e96e5e0b0c4bbdab321a149f Mon Sep 17 00:00:00 2001
+From a8c8926b84d473dc2117809b633f92ef8d3936fc Mon Sep 17 00:00:00 2001
 From: Yan Fang1 <yan.fang1@amlogic.com>
-Date: Fri, 18 Jun 2021 13:06:53 +0800
+Date: Fri, 9 Jul 2021 15:38:13 +0800
 Subject: [PATCH] boot: speed up booting, remove useless module [1/1]
 
-PD#
+PD#SWPL-43161
 
 Problem:
 need speedup and upgrade thread priority
@@ -14,8 +14,7 @@ upgrade thread priority
 Verify:
 can speed up about 2s.
 
-Change-Id: Ie23605c7ca4b350d27355879fc001eeab0a4b48e
-Signed-off-by: Yan Fang1 <yan.fang1@amlogic.com>
+Change-Id: I34977eca04a44a926cd14713feb3bd71af68d520
 ---
  .../com/android/server/SystemServerInitThreadPool.java    | 2 +-
  services/java/com/android/server/SystemServer.java        | 8 +++++---
@@ -35,7 +34,7 @@ index c0611374679b..2ce9e64d6c9c 100644
  
      /**
 diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
-index 88e698121617..56d3b8850f4c 100644
+index 21e634076ba1..3a10b23c87a7 100644
 --- a/services/java/com/android/server/SystemServer.java
 +++ b/services/java/com/android/server/SystemServer.java
 @@ -436,6 +436,7 @@ public final class SystemServer {
@@ -62,7 +61,7 @@ index 88e698121617..56d3b8850f4c 100644
              Slog.wtf(TAG, "Runtime is not running with a boot image!");
          }
 -
-+        android.os.Process.setThreadPriority(
++	android.os.Process.setThreadPriority(
 +            android.os.Process.THREAD_PRIORITY_FOREGROUND);
          // Loop forever.
          Looper.loop();
