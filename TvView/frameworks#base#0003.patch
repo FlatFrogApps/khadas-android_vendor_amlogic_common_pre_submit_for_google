@@ -1,0 +1,44 @@
+From ae14e68883d3c9f40d75ad57607d38c18c7b1f19 Mon Sep 17 00:00:00 2001
+From: "qiyao.zhou" <qiyao.zhou@amlogic.com>
+Date: Fri, 16 Jul 2021 16:56:28 +0800
+Subject: [PATCH] TvView: screen color setting don't work immediately. [1/1]
+
+PD#SWPL-55455
+
+Problem:
+TvView don't update according to ui setting.
+
+Solution:
+Sendbroadcast to livetv while ui setting change.
+
+Verify:
+verify by am301.
+
+Change-Id: I20dd4b8ccfc370bb44ea0a093982129fc735f512
+Signed-off-by: qiyao.zhou <qiyao.zhou@amlogic.com>
+---
+ media/java/android/media/tv/TvView.java | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/media/java/android/media/tv/TvView.java b/media/java/android/media/tv/TvView.java
+index a76cfbad6bc8..4ad3d8594bb1 100644
+--- a/media/java/android/media/tv/TvView.java
++++ b/media/java/android/media/tv/TvView.java
+@@ -573,7 +573,13 @@ public class TvView extends ViewGroup {
+             throw new IllegalArgumentException("action cannot be null or an empty string");
+         }
+         if (action.equals("blue_screen_setting")) {
+-            mIsBlueScreenEnable = data.getBoolean("blue_screen_setting", false);;
++            Log.w(TAG, "recieve blue screen setting event.");
++            mIsBlueScreenEnable = data.getBoolean("blue_screen_setting", false);
++            if (mSurfaceView != null) {
++                mSurfaceView.setResizeBackgroundColor(isBlueScreenEnabled() ? 0xff0000ff : 0);
++            } else {
++                Log.w(TAG, "mSurfaceView is null");
++            }
+         }
+ 
+         if (mSession != null) {
+-- 
+2.29.0
+
