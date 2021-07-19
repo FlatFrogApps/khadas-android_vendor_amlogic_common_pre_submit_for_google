@@ -1,0 +1,35 @@
+From feff63953f0e4b36e43c9bc24951f3d66ce6bb8a Mon Sep 17 00:00:00 2001
+From: Yan Fang1 <yan.fang1@amlogic.com>
+Date: Mon, 19 Jul 2021 10:37:13 +0800
+Subject: [PATCH] Boot: speed up SystemService [2/2]
+
+PD#SWPL-43161
+
+Problem:
+preloadClasses & preloadResource takes too much time blocked systemservice fork
+
+Solution:
+use --enable-lazy-preload
+
+Verify:
+S4,SC2,T3
+
+Change-Id: I1cb10b188f26b97d7647b40775d41ab556f40e5c
+Signed-off-by: Yan Fang1 <yan.fang1@amlogic.com>
+---
+ rootdir/init.zygote32.rc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/rootdir/init.zygote32.rc b/rootdir/init.zygote32.rc
+index e827cf557..d63c4d024 100644
+--- a/rootdir/init.zygote32.rc
++++ b/rootdir/init.zygote32.rc
+@@ -1,4 +1,4 @@
+-service zygote /system/bin/app_process -Xzygote /system/bin --zygote --start-system-server
++service zygote /system/bin/app_process -Xzygote /system/bin --zygote --start-system-server --enable-lazy-preload
+     class main
+     priority -20
+     user root
+-- 
+2.25.1
+
