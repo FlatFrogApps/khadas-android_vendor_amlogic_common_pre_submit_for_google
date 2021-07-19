@@ -1,0 +1,84 @@
+From a0b11fd1abbb6bbedfa217c507c488c5169c40c0 Mon Sep 17 00:00:00 2001
+From: Yan Fang1 <yan.fang1@amlogic.com>
+Date: Mon, 19 Jul 2021 10:24:44 +0800
+Subject: [PATCH] Boot: speed up SystemService [1/2]
+
+PD#SWPL-43161
+
+Problem:
+preloadClasses & preloadResource takes too much time blocked systemservice fork
+
+Solution:
+use --enable-lazy-preload
+
+Verify:
+S4,SC2,T3
+
+Change-Id: I8855d662c5c3fe714bff92bdf3528231cf5f5e46
+Signed-off-by: Yan Fang1 <yan.fang1@amlogic.com>
+---
+ .../com/android/internal/os/ZygoteInit.java   | 33 +++++++++++--------
+ 1 file changed, 19 insertions(+), 14 deletions(-)
+
+diff --git a/core/java/com/android/internal/os/ZygoteInit.java b/core/java/com/android/internal/os/ZygoteInit.java
+index 2e32730a6ecb..2f8d763f107a 100644
+--- a/core/java/com/android/internal/os/ZygoteInit.java
++++ b/core/java/com/android/internal/os/ZygoteInit.java
+@@ -125,8 +125,24 @@ public class ZygoteInit {
+ 
+     private static boolean sPreloadComplete;
+ 
+-    static void preload(TimingsTraceLog bootTimingsTraceLog) {
++    static void firstpreload(TimingsTraceLog bootTimingsTraceLog) {
++        // In some configurations, we avoid preloading resources and classes eagerly.
++        // In such cases, we will preload things prior to our first fork.
+         Log.d(TAG, "begin preload");
++        Trace.traceBegin(Trace.TRACE_TAG_DALVIK, "PreloadAppProcessHALs");
++        nativePreloadAppProcessHALs();
++        Trace.traceEnd(Trace.TRACE_TAG_DALVIK);
++        Trace.traceBegin(Trace.TRACE_TAG_DALVIK, "PreloadGraphicsDriver");
++        maybePreloadGraphicsDriver();
++        Trace.traceEnd(Trace.TRACE_TAG_DALVIK);
++        preloadSharedLibraries();
++        preloadTextResources();
++        // Ask the WebViewFactory to do any initialization that must run in the zygote process,
++        // for memory sharing purposes.
++        WebViewFactory.prepareWebViewInZygote();
++    }
++
++    static void preload(TimingsTraceLog bootTimingsTraceLog) {
+         bootTimingsTraceLog.traceBegin("BeginPreload");
+         beginPreload();
+         bootTimingsTraceLog.traceEnd(); // BeginPreload
+@@ -139,17 +155,6 @@ public class ZygoteInit {
+         bootTimingsTraceLog.traceBegin("PreloadResources");
+         preloadResources();
+         bootTimingsTraceLog.traceEnd(); // PreloadResources
+-        Trace.traceBegin(Trace.TRACE_TAG_DALVIK, "PreloadAppProcessHALs");
+-        nativePreloadAppProcessHALs();
+-        Trace.traceEnd(Trace.TRACE_TAG_DALVIK);
+-        Trace.traceBegin(Trace.TRACE_TAG_DALVIK, "PreloadGraphicsDriver");
+-        maybePreloadGraphicsDriver();
+-        Trace.traceEnd(Trace.TRACE_TAG_DALVIK);
+-        preloadSharedLibraries();
+-        preloadTextResources();
+-        // Ask the WebViewFactory to do any initialization that must run in the zygote process,
+-        // for memory sharing purposes.
+-        WebViewFactory.prepareWebViewInZygote();
+         endPreload();
+         warmUpJcaProviders();
+         Log.d(TAG, "end preload");
+@@ -891,8 +896,8 @@ public class ZygoteInit {
+                 throw new RuntimeException("No ABI list supplied.");
+             }
+ 
+-            // In some configurations, we avoid preloading resources and classes eagerly.
+-            // In such cases, we will preload things prior to our first fork.
++            firstpreload(bootTimingsTraceLog);
++
+             if (!enableLazyPreload) {
+                 bootTimingsTraceLog.traceBegin("ZygotePreload");
+                 EventLog.writeEvent(LOG_BOOT_PROGRESS_PRELOAD_START,
+-- 
+2.25.1
+
