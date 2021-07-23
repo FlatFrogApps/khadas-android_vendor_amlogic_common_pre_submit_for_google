@@ -1,0 +1,41 @@
+From b5c35a722f7a104bb5e9efadd3962e6edec0a83b Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Fri, 23 Jul 2021 09:59:22 +0800
+Subject: [PATCH] cec: no more show volume bar if passthrough condition is not
+ ok [1/1]
+
+PD#SWPL-56084
+
+Problem:
+Volume bar still shows and is covered by warning toast when box
+can't process dolby audio format locally.
+
+Solution:
+As google suggests and Toast widgest can't be customized, then just
+no more show volume bar if passthrough condition is not ok.
+
+Verify:
+t3 on p and r.
+
+Change-Id: I9814fdfd58b21d5fc31fde51a05a803a5a59a88a
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ services/core/java/com/android/server/audio/AudioService.java | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/audio/AudioService.java b/services/core/java/com/android/server/audio/AudioService.java
+index 2d4cafe62965..8ba308f2ecfd 100755
+--- a/services/core/java/com/android/server/audio/AudioService.java
++++ b/services/core/java/com/android/server/audio/AudioService.java
+@@ -7472,7 +7472,7 @@ public class AudioService extends IAudioService.Stub
+ 
+         // show a warning to help the user switch to tv's remote when no key events is sent.
+         showPassthroughWarning();
+-        return false;
++        return true;
+     }
+ 
+     private void showPassthroughToast() {
+-- 
+2.26.1
+
