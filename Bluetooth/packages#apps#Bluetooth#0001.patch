@@ -1,0 +1,28 @@
+From aadf391f84a09578f2dafc09fa393c30663d8375 Mon Sep 17 00:00:00 2001
+From: "qiu.zeng" <qiu.zeng@amlogic.com>
+Date: Wed, 4 Aug 2021 12:25:31 +0800
+Subject: [PATCH] BT: A2DP connected device autoreconnects after standby [1/1]
+
+Change-Id: Ic74acceea5834c0534a0b868c4a57705e9206434
+---
+ src/com/android/bluetooth/btservice/PhonePolicy.java | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/com/android/bluetooth/btservice/PhonePolicy.java b/src/com/android/bluetooth/btservice/PhonePolicy.java
+index 05a01834a..3b5eccef6 100644
+--- a/src/com/android/bluetooth/btservice/PhonePolicy.java
++++ b/src/com/android/bluetooth/btservice/PhonePolicy.java
+@@ -317,7 +317,9 @@ class PhonePolicy {
+                 connectOtherProfile(device);
+             }
+             if (nextState == BluetoothProfile.STATE_DISCONNECTED) {
+-                if (profileId == BluetoothProfile.A2DP) {
++                if (profileId == BluetoothProfile.A2DP
++                        && (prevState == BluetoothProfile.STATE_CONNECTING
++                        || prevState == BluetoothProfile.STATE_DISCONNECTING)) {
+                     mAdapterService.getDatabase().setDisconnection(device);
+                 }
+                 handleAllProfilesDisconnected(device);
+-- 
+2.28.0
+
