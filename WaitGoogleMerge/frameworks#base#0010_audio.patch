@@ -1,0 +1,47 @@
+From 91df86284f1454287ba1fbbf5465f6e107e86bf7 Mon Sep 17 00:00:00 2001
+From: "hongchao.yin" <hongchao.yin@amlogic.com>
+Date: Wed, 4 Aug 2021 15:57:17 +0800
+Subject: [PATCH] AudioService: When the music volume is muted set avrcp to 0
+ [1/1]
+
+PD#SWPL-56461
+
+Problem:
+{T5D}{Android R}{BT}Could not mute BT voice after connect to BT speaker.
+
+Solution:
+1.Reason:
+1). When the music volume is muted set error volume index to avrcp.
+2.Solution:
+1). When the music volume is muted set avrcp to 0
+
+Verify:
+verrify by Android R + T5D
+
+Change-Id: I7fb4f24da2ff90933a279d7e5b7c7c9cdb905165
+Signed-off-by: hongchao.yin <hongchao.yin@amlogic.com>
+---
+ .../core/java/com/android/server/audio/AudioService.java   | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/services/core/java/com/android/server/audio/AudioService.java b/services/core/java/com/android/server/audio/AudioService.java
+index 5d89cd71f177..058c8c61a8a6 100644
+--- a/services/core/java/com/android/server/audio/AudioService.java
++++ b/services/core/java/com/android/server/audio/AudioService.java
+@@ -2300,6 +2300,13 @@ public class AudioService extends IAudioService.Stub
+             if (streamTypeAlias == AudioSystem.STREAM_MUSIC
+                     && AudioSystem.DEVICE_OUT_ALL_A2DP_SET.contains(device)
+                     && (flags & AudioManager.FLAG_BLUETOOTH_ABS_VOLUME) == 0) {
++                /* Need set index 0 to AVRCP when music type is muted. */
++                /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++                /* Change-Id: I67f8bc5298bb2f6f9dcfecfde26e55c448d16b5d */
++                if (mStreamStates[streamType].mIsMuted) {
++                    newIndex = 0;
++                }
++                /*[Amlogic end]-----------------------------------------------------------*/
+                 if (DEBUG_VOL) {
+                     Log.d(TAG, "adjustSreamVolume: postSetAvrcpAbsoluteVolumeIndex index="
+                             + newIndex + "stream=" + streamType);
+-- 
+2.25.1
+
