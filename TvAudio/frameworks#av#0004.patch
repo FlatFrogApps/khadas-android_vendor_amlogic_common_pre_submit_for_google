@@ -1,0 +1,47 @@
+From 1efa9fec1ff0d35785926c2874cefdff5f7c8181 Mon Sep 17 00:00:00 2001
+From: "hongchao.yin" <hongchao.yin@amlogic.com>
+Date: Tue, 17 Aug 2021 17:05:35 +0800
+Subject: [PATCH] APM: modify the istv prop name [1/1]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+PD#SWPL-57559
+
+Problem:
+[audio][android R][AOSP]：Connect with TV by cvbs cable
+during playback video，press voice key cannot change the volume .
+Frequency：5/5，Comparison：0811 GTVS is OK
+
+Solution:
+1.Reason:
+1). The prop "ro.vendor.platform.is.tv" is true when DTVkit is present
+2). Ohm + DTVkit use the tv control volume logic.
+2.Solution:
+1). Use the "ro.vendor.platform.has.tvuimode" prop.
+
+Verify:
+verrify by Android R + Ohm
+
+Change-Id: I8ee18d93b8a63982809413674b26939caa6b9005
+Signed-off-by: hongchao.yin <hongchao.yin@amlogic.com>
+---
+ services/audiopolicy/managerdefault/AudioPolicyManager.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index c53fd3663c..ddb1ef3460 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -6154,7 +6154,7 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
+     /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
+     /* Change-Id: Ia4120848f02c700d9b03a48e0b7122415eb63799 */
+     /* Need adjust audio hal volume when television platform. */
+-    if (property_get_bool("ro.vendor.platform.is.tv", false /* default_value */)) {
++    if (property_get_bool("ro.vendor.platform.has.tvuimode", false /* default_value */)) {
+         DeviceTypeSet   curSrcDevicesVector = deviceTypesFromBitMask(getDevicesForStream(AUDIO_STREAM_MUSIC));
+         audio_devices_t curDevice = Volume::getDeviceForVolume(curSrcDevicesVector);
+         DeviceTypeSet   curDeviceVector = deviceTypesFromBitMask(curDevice);
+-- 
+2.25.1
+
