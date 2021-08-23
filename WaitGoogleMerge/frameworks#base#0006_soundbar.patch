@@ -1,0 +1,65 @@
+From 04d963d57bc789704a283976d2b95f7a13d6b2ae Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Mon, 23 Aug 2021 14:56:07 +0800
+Subject: [PATCH] cec: fix a stability issue of soundbar [1/1]
+
+PD#SWPL-58294
+
+Problem:
+If the connected playback device does not support
+<Give Osd Name>, then the DeviceSelectAction maybe
+encounters a crash.
+
+Solution:
+If the device is not tv, then it should not call
+addDeviceInfo function directly.
+
+Verify:
+ohm
+
+Change-Id: I10c9a8f9790b969cacac8ead72192e318c287813
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../com/android/server/hdmi/NewDeviceAction.java     | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/services/core/java/com/android/server/hdmi/NewDeviceAction.java b/services/core/java/com/android/server/hdmi/NewDeviceAction.java
+index 11bcfadaedb7..1ef46fad902f 100644
+--- a/services/core/java/com/android/server/hdmi/NewDeviceAction.java
++++ b/services/core/java/com/android/server/hdmi/NewDeviceAction.java
+@@ -120,6 +120,13 @@ final class NewDeviceAction extends HdmiCecFeatureAction {
+                 requestVendorId(true);
+                 return true;
+             } else if (opcode == Constants.MESSAGE_FEATURE_ABORT) {
++                if (localDevice() instanceof HdmiCecLocalDeviceAudioSystem) {
++                    // don't care about vendor id for audio system in hotplug scenario.
++                    addDeviceInfoForAudioSystem();
++                    finish();
++                    return true;
++                }
++
+                 int requestOpcode = params[0] & 0xFF;
+                 if (requestOpcode == Constants.MESSAGE_GIVE_OSD_NAME) {
+                     requestVendorId(true);
+@@ -180,6 +187,10 @@ final class NewDeviceAction extends HdmiCecFeatureAction {
+     }
+ 
+     private void addDeviceInfo() {
++        if (!(localDevice() instanceof HdmiCecLocalDeviceTv)) {
++            HdmiLogger.error("addDeviceInfo but no tv device");
++            return;
++        }
+         // The device should be in the device list with default information.
+         if (!tv().isInDeviceList(mDeviceLogicalAddress, mDevicePhysicalAddress)) {
+             Slog.w(TAG, String.format("Device not found (%02x, %04x)",
+@@ -212,6 +223,7 @@ final class NewDeviceAction extends HdmiCecFeatureAction {
+             if (localDevice() instanceof HdmiCecLocalDeviceAudioSystem) {
+                 addDeviceInfoForAudioSystem();
+                 finish();
++                return;
+             }
+             // Osd name request timed out. Try vendor id
+             requestVendorId(true);
+-- 
+2.26.1
+
