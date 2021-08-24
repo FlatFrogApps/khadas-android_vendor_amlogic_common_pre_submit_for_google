@@ -1,0 +1,44 @@
+From b9971faf0efcfc0b4f0b97f8edab597df9eea84e Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Tue, 24 Aug 2021 16:39:18 +0800
+Subject: [PATCH] cec: add passthrough support for cast scenario [1/1]
+
+PD#SWPL-57918
+
+Problem:
+If the volume value can't be adjusted in passthrough
+mode, then in cast scenario the direction got could
+always be 0 and no volume key could be sent.
+
+Solution:
+The volume value could be changed in passthrough mode.
+
+Verify:
+ohm
+
+Change-Id: I22f774f4c8d585640bdda6e35bfb6ad2748a02e0
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../core/java/com/android/server/audio/AudioService.java    | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/services/core/java/com/android/server/audio/AudioService.java b/services/core/java/com/android/server/audio/AudioService.java
+index 2d4cafe62965..7a020e14cee1 100755
+--- a/services/core/java/com/android/server/audio/AudioService.java
++++ b/services/core/java/com/android/server/audio/AudioService.java
+@@ -3044,12 +3044,6 @@ public class AudioService extends IAudioService.Stub
+                                     int device,
+                                     boolean force,
+                                     String caller, boolean hasModifyAudioSettings) {
+-        if (isInVolumePassthrough()) {
+-            if (DEBUG_VOL) {
+-                Slog.d(TAG, "setStreamVolumeInt is of no need in passthrough audio format.");
+-            }
+-            return;
+-        }
+         VolumeStreamState streamState = mStreamStates[streamType];
+ 
+         if (streamState.setIndex(index, device, caller, hasModifyAudioSettings) || force) {
+-- 
+2.26.1
+
