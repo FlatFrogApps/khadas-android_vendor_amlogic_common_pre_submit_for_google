@@ -1,0 +1,76 @@
+From 90ce6e757d4e19736672c82119dd76cf1d0ada8e Mon Sep 17 00:00:00 2001
+From: wei wang <wei.wang@amlogic.com>
+Date: Tue, 10 Aug 2021 13:11:09 +0800
+Subject: [PATCH] GlobalAction: show global action in long pressing power [1/1]
+
+PD#SWPL-48783
+
+Problem:
+GlobalActionsComponent which implements
+handleShowGlobalActionsMenu() was removed
+
+Solution:
+use legacyGlobalActions instead
+
+Verify:
+Verify it on ohm
+
+Signed-off-by: wei wang <wei.wang@amlogic.com>
+Change-Id: I78d8c7ed65835c42b8ee1cf25b9f6f7420fd7385
+---
+ .../java/com/android/server/policy/GlobalActions.java    | 9 +++++++--
+ .../com/android/server/policy/LegacyGlobalActions.java   | 5 ++---
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/services/core/java/com/android/server/policy/GlobalActions.java b/services/core/java/com/android/server/policy/GlobalActions.java
+index e1461356cc4c..176cc527f383 100644
+--- a/services/core/java/com/android/server/policy/GlobalActions.java
++++ b/services/core/java/com/android/server/policy/GlobalActions.java
+@@ -64,14 +64,19 @@ class GlobalActions implements GlobalActionsProvider.GlobalActionsListener {
+         mKeyguardShowing = keyguardShowing;
+         mDeviceProvisioned = deviceProvisioned;
+         mShowing = true;
+-        if (mGlobalActionsAvailable) {
++        /*if (mGlobalActionsAvailable) {
+             mHandler.postDelayed(mShowTimeout, 5000);
+             mGlobalActionsProvider.showGlobalActions();
+         } else {
+             // SysUI isn't alive, show legacy menu.
+             ensureLegacyCreated();
+             mLegacyGlobalActions.showDialog(mKeyguardShowing, mDeviceProvisioned);
+-        }
++        }*/
++        //service ('GlobalActionsComponent') was removed from /SystemUI/res/values/config.xml
++        //So it was not started and no componnet implements handleShowGlobalActionsMenu() in Android R now .
++        //So we use legacyGlobalAction instead.
++        ensureLegacyCreated();
++        mLegacyGlobalActions.showDialog(mKeyguardShowing, mDeviceProvisioned);
+     }
+ 
+     @Override
+diff --git a/services/core/java/com/android/server/policy/LegacyGlobalActions.java b/services/core/java/com/android/server/policy/LegacyGlobalActions.java
+index 9c3a39440054..09707945c436 100644
+--- a/services/core/java/com/android/server/policy/LegacyGlobalActions.java
++++ b/services/core/java/com/android/server/policy/LegacyGlobalActions.java
+@@ -293,8 +293,6 @@ class LegacyGlobalActions implements DialogInterface.OnDismissListener, DialogIn
+                 }
+             } else if (GLOBAL_ACTION_KEY_SETTINGS.equals(actionKey)) {
+                 mItems.add(getSettingsAction());
+-            } else if (GLOBAL_ACTION_KEY_LOCKDOWN.equals(actionKey)) {
+-                mItems.add(getLockdownAction());
+             } else if (GLOBAL_ACTION_KEY_VOICEASSIST.equals(actionKey)) {
+                 mItems.add(getVoiceAssistAction());
+             } else if (GLOBAL_ACTION_KEY_ASSIST.equals(actionKey)) {
+@@ -309,7 +307,8 @@ class LegacyGlobalActions implements DialogInterface.OnDismissListener, DialogIn
+         }
+ 
+         if (mEmergencyAffordanceManager.needsEmergencyAffordance()) {
+-            mItems.add(getEmergencyAction());
++			if (mEmergencyAffordanceManager.needsEmergencyAffordance())
++                mItems.add(getEmergencyAction());
+         }
+ 
+         mAdapter = new ActionsAdapter(mContext, mItems,
+-- 
+2.26.1
+
