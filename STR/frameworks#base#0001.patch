@@ -1,0 +1,90 @@
+From 16acafe10b27891bbbc64c47143c37ba5451380a Mon Sep 17 00:00:00 2001
+From: Yan Fang1 <yan.fang1@amlogic.com>
+Date: Mon, 13 Sep 2021 17:27:47 +0800
+Subject: [PATCH] str: fixed suspend take 6s
+
+PD#SWPL-55344
+
+Problem:
+MboxLauncher need more time to change state
+
+Solution:
+1.poll the resume Activities size in checkReadyForSleepLocked() with 50ms period
+
+Verify:
+t3
+
+Change-Id: If14860fbdc7cca3db846f15e26faf70d7cbce2ca
+Signed-off-by: Yan Fang1 <yan.fang1@amlogic.com>
+---
+ .../server/wm/ActivityStackSupervisor.java    | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/services/core/java/com/android/server/wm/ActivityStackSupervisor.java b/services/core/java/com/android/server/wm/ActivityStackSupervisor.java
+index 7e6b7cd05762..1f11137b1fec 100644
+--- a/services/core/java/com/android/server/wm/ActivityStackSupervisor.java
++++ b/services/core/java/com/android/server/wm/ActivityStackSupervisor.java
+@@ -170,6 +170,7 @@ public class ActivityStackSupervisor implements RecentTasks.Callbacks {
+     /** How long we can hold the sleep wake lock before giving up. */
+     private static final int SLEEP_TIMEOUT = 5 * 1000;
+ 
++    private static final int RESUME_POLLING = 50;
+     // How long we can hold the launch wake lock before giving up.
+     private static final int LAUNCH_TIMEOUT = 10 * 1000;
+ 
+@@ -182,6 +183,7 @@ public class ActivityStackSupervisor implements RecentTasks.Callbacks {
+     private static final int SLEEP_TIMEOUT_MSG = FIRST_SUPERVISOR_STACK_MSG + 3;
+     private static final int LAUNCH_TIMEOUT_MSG = FIRST_SUPERVISOR_STACK_MSG + 4;
+     private static final int PROCESS_STOPPING_AND_FINISHING_MSG = FIRST_SUPERVISOR_STACK_MSG + 5;
++    private static final int SLEEP_ACTIVITY_RESUME_POLLING_MSG = FIRST_SUPERVISOR_STACK_MSG + 6;
+     private static final int LAUNCH_TASK_BEHIND_COMPLETE = FIRST_SUPERVISOR_STACK_MSG + 12;
+     private static final int RESTART_ACTIVITY_PROCESS_TIMEOUT_MSG = FIRST_SUPERVISOR_STACK_MSG + 13;
+     private static final int REPORT_MULTI_WINDOW_MODE_CHANGED_MSG = FIRST_SUPERVISOR_STACK_MSG + 14;
+@@ -1760,6 +1762,7 @@ public class ActivityStackSupervisor implements RecentTasks.Callbacks {
+ 
+         if (!mRootWindowContainer.putStacksToSleep(
+                 allowDelay, false /* shuttingDown */)) {
++            scheduleSleepResumesPoll();
+             return;
+         }
+ 
+@@ -1767,6 +1770,7 @@ public class ActivityStackSupervisor implements RecentTasks.Callbacks {
+         mRootWindowContainer.sendPowerHintForLaunchEndIfNeeded();
+ 
+         removeSleepTimeouts();
++        removeSleepResumesPoll();
+ 
+         if (mGoingToSleepWakeLock.isHeld()) {
+             mGoingToSleepWakeLock.release();
+@@ -2124,6 +2128,15 @@ public class ActivityStackSupervisor implements RecentTasks.Callbacks {
+         mHandler.sendEmptyMessageDelayed(SLEEP_TIMEOUT_MSG, SLEEP_TIMEOUT);
+     }
+ 
++    void removeSleepResumesPoll() {
++        mHandler.removeMessages(SLEEP_ACTIVITY_RESUME_POLLING_MSG);
++    }
++
++    final void scheduleSleepResumesPoll() {
++        removeSleepResumesPoll();
++        mHandler.sendEmptyMessageDelayed(SLEEP_ACTIVITY_RESUME_POLLING_MSG, RESUME_POLLING);
++    }
++
+     void removeRestartTimeouts(ActivityRecord r) {
+         mHandler.removeMessages(RESTART_ACTIVITY_PROCESS_TIMEOUT_MSG, r);
+     }
+@@ -2418,6 +2431,12 @@ public class ActivityStackSupervisor implements RecentTasks.Callbacks {
+                         checkReadyForSleepLocked(false /* allowDelay */);
+                     }
+                 } break;
++                case SLEEP_ACTIVITY_RESUME_POLLING_MSG: {
++                    if (mService.isSleepingOrShuttingDownLocked()) {
++                        Slog.w(TAG, "some activity isn't pausing ,resume polling");
++                        checkReadyForSleepLocked(true /* allowDelay */);
++                    }
++                } break;
+                 case LAUNCH_TIMEOUT_MSG: {
+                     if (mLaunchingActivityWakeLock.isHeld()) {
+                         Slog.w(TAG, "Launch timeout has expired, giving up wake lock!");
+-- 
+2.25.1
+
