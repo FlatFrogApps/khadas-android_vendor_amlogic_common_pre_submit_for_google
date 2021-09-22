@@ -1,0 +1,39 @@
+From cfa744bf643bab456bdce4910d42f660d022bb28 Mon Sep 17 00:00:00 2001
+From: che song <che.song@amlogic.com>
+Date: Wed, 22 Sep 2021 11:31:01 +0800
+Subject: [PATCH] TvAudio: Merger code from google to fix recordthread abort
+ isuue [1/1]
+
+PD#SWPL-59898
+
+Problem:
+mRsmpInRear would overflow,RecordThread have abort issue
+
+Solution:
+enable integer_overflow diagnostics
+
+Verify:
+verify by t982
+
+Change-Id: I1795757a3c729c2d31c13b0e6cafad3f2e86400f
+Signed-off-by: Che Song <che.song@amlogic.com>
+---
+ services/audioflinger/Threads.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index 1d0147d56b..adafa4aae0 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -7434,7 +7434,7 @@ reacquire_wakelock:
+                         (framesRead - part1) * mFrameSize);
+             }
+         }
+-        rear = mRsmpInRear += framesRead;
++        mRsmpInRear = audio_utils::safe_add_overflow(mRsmpInRear, (int32_t)framesRead);
+ 
+         size = activeTracks.size();
+ 
+-- 
+2.28.0
+
