@@ -1,0 +1,95 @@
+From f815e26c1320ad4fa14b3088c03f5e5e01828a53 Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Sun, 3 Oct 2021 16:25:34 +0800
+Subject: [PATCH] cec: open cec log switch by default in framework [1/2]
+
+PD#SWPL-60052
+
+Problem:
+The message flow of cec is missing in user debug mode.
+
+Solution:
+1. open cec log switch by default in framework.
+2. add one touch play retry.
+
+Verify:
+T7_an400
+
+Change-Id: Ib36f006d34250bcc155247604e673c180397609f
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../java/com/android/server/hdmi/HdmiControlService.java     | 5 +++++
+ services/core/java/com/android/server/hdmi/HdmiLogger.java   | 3 ++-
+ .../java/com/android/server/hdmi/OneTouchPlayAction.java     | 5 ++++-
+ 3 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiControlService.java b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+index a4ad00562d84..f4aca175921e 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiControlService.java
++++ b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+@@ -1369,6 +1369,7 @@ public class HdmiControlService extends SystemService {
+         }
+         AudioManager audioManager = getAudioManager();
+         boolean muted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC);
++        int currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+         if (mute) {
+             if (!muted) {
+                 audioManager.setStreamMute(AudioManager.STREAM_MUSIC, true);
+@@ -1382,6 +1383,10 @@ public class HdmiControlService extends SystemService {
+             int flag = AudioManager.FLAG_HDMI_SYSTEM_AUDIO_VOLUME;
+             if (0 <= volume && volume <= 100) {
+                 Slog.i(TAG, "volume: " + volume);
++                if (currentVolume == volume) {
++                    Slog.d(TAG, "no need to update volume for it's equal");
++                    return;
++                }
+                 flag |= AudioManager.FLAG_SHOW_UI;
+                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, volume, flag);
+             }
+diff --git a/services/core/java/com/android/server/hdmi/HdmiLogger.java b/services/core/java/com/android/server/hdmi/HdmiLogger.java
+index 2b922364b26c..0b1e98bd8e0e 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiLogger.java
++++ b/services/core/java/com/android/server/hdmi/HdmiLogger.java
+@@ -17,6 +17,7 @@
+ package com.android.server.hdmi;
+ 
+ import android.annotation.Nullable;
++import android.os.Build;
+ import android.os.SystemClock;
+ import android.util.Log;
+ import android.util.Pair;
+@@ -42,7 +43,7 @@ final class HdmiLogger {
+     // Logging duration for same error message.
+     private static final long ERROR_LOG_DURATION_MILLIS = 20 * 1000;  // 20s
+ 
+-    private static final boolean DEBUG = Log.isLoggable(TAG, Log.DEBUG);
++    private static final boolean DEBUG = Build.IS_USERDEBUG || Log.isLoggable(TAG, Log.DEBUG);
+ 
+     private static final ThreadLocal<HdmiLogger> sLogger = new ThreadLocal<>();
+ 
+diff --git a/services/core/java/com/android/server/hdmi/OneTouchPlayAction.java b/services/core/java/com/android/server/hdmi/OneTouchPlayAction.java
+index a79353aec518..5a6b95db65f6 100644
+--- a/services/core/java/com/android/server/hdmi/OneTouchPlayAction.java
++++ b/services/core/java/com/android/server/hdmi/OneTouchPlayAction.java
+@@ -48,7 +48,7 @@ final class OneTouchPlayAction extends HdmiCecFeatureAction {
+     // The maximum number of times we send <Give Device Power Status> before we give up.
+     // We wait up to RESPONSE_TIMEOUT_MS * (LOOP_COUNTER_MAX + 1) = 2 seconds.
+     // No need to continueously observe tv's power status.
+-    private static final int LOOP_COUNTER_MAX = 0;
++    private static final int LOOP_COUNTER_MAX = 3;
+     // Time for tv to respond the power status.
+     private static final int OTP_TIMEOUT_MS = 4000;
+ 
+@@ -131,6 +131,9 @@ final class OneTouchPlayAction extends HdmiCecFeatureAction {
+         }
+         if (state == STATE_WAITING_FOR_REPORT_POWER_STATUS) {
+             if (mPowerStatusCounter++ < LOOP_COUNTER_MAX) {
++                Slog.e(TAG, "one touch play retry:" + mPowerStatusCounter);
++                sendCommand(HdmiCecMessageBuilder.buildTextViewOn(getSourceAddress(), mTargetAddress));
++                sendCommand(HdmiCecMessageBuilder.buildActiveSource(getSourceAddress(), getSourcePath()));
+                 queryDevicePowerStatus();
+                 addTimer(mState, HdmiConfig.TIMEOUT_MS);
+             } else {
+-- 
+2.26.1
+
