@@ -1,0 +1,92 @@
+From 0b5c8c93d65b8005349a8673b28d3e85b58b55c0 Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Tue, 12 Oct 2021 14:35:29 +0800
+Subject: [PATCH] tvinput: add death receipient for tv input service [1/1]
+
+PD#SWPL-61106
+
+Problem:
+system_server may fail to connect tv_input service
+if it crashes.
+
+Solution:
+add death receipient for tv input service.
+
+Verify:
+newton
+
+Change-Id: I3dc8f4c6bd61060516bf130bc93d039b46bfd86d
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../jni/com_android_server_tv_TvInputHal.cpp  | 27 +++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/services/core/jni/com_android_server_tv_TvInputHal.cpp b/services/core/jni/com_android_server_tv_TvInputHal.cpp
+index a5311f33eb36..ce42ad1e18f4 100644
+--- a/services/core/jni/com_android_server_tv_TvInputHal.cpp
++++ b/services/core/jni/com_android_server_tv_TvInputHal.cpp
+@@ -298,6 +298,15 @@ private:
+         JTvInputHal* mHal;
+     };
+ 
++    class TvInputHalDeathReceivier : public android::hardware::hidl_death_recipient {
++    public:
++        TvInputHalDeathReceivier(JTvInputHal* hal): mHal(hal) {};
++        virtual void serviceDied(uint64_t cookie,
++                                 const wp<::android::hidl::base::V1_0::IBase>& service) override;
++    private:
++        JTvInputHal* mHal;
++    };
++
+     JTvInputHal(JNIEnv* env, jobject thiz, sp<ITvInput> tvInput, const sp<Looper>& looper);
+ 
+     Mutex mLock;
+@@ -309,6 +318,7 @@ private:
+ 
+     sp<ITvInput> mTvInput;
+     sp<ITvInputCallback> mTvInputCallback;
++    sp<TvInputHalDeathReceivier> mDeathReceiver;
+ };
+ 
+ JTvInputHal::JTvInputHal(JNIEnv* env, jobject thiz, sp<ITvInput> tvInput,
+@@ -318,6 +328,8 @@ JTvInputHal::JTvInputHal(JNIEnv* env, jobject thiz, sp<ITvInput> tvInput,
+     mLooper = looper;
+     mTvInputCallback = new TvInputCallback(this);
+     mTvInput->setCallback(mTvInputCallback);
++    mDeathReceiver = new TvInputHalDeathReceivier(this);
++    mTvInput->linkToDeath(mDeathReceiver, /*cookie*/ 0);
+ }
+ 
+ JTvInputHal::~JTvInputHal() {
+@@ -334,6 +346,7 @@ JTvInputHal* JTvInputHal::createInstance(JNIEnv* env, jobject thiz, const sp<Loo
+         ALOGE("Couldn't get tv.input service.");
+         return nullptr;
+     }
++    ALOGI("got tv.input service.");
+ 
+     return new JTvInputHal(env, thiz, tvInput, looper);
+ }
+@@ -587,6 +600,20 @@ Return<void> JTvInputHal::TvInputCallback::notify(const TvInputEvent& event) {
+     return Void();
+ }
+ 
++void JTvInputHal::TvInputHalDeathReceivier::serviceDied(
++        uint64_t /* cookie */,
++        const wp<::android::hidl::base::V1_0::IBase>& /* service */) {
++    ALOGE("TvInput HAL died, attempting to reconnect.");
++    sp<ITvInput> tvInput = ITvInput::getService();
++    if (tvInput == nullptr) {
++        ALOGE("Couldn't get tv.input service.");
++        return;
++    }
++    tvInput->setCallback(mHal->mTvInputCallback);
++    tvInput->linkToDeath(mHal->mDeathReceiver, /*cookie*/ 0);
++    mHal->mTvInput = tvInput;
++}
++
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+ static jlong nativeOpen(JNIEnv* env, jobject thiz, jobject messageQueueObj) {
+-- 
+2.26.1
+
