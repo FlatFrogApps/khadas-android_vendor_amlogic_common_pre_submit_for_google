@@ -1,0 +1,38 @@
+From 31a70e3b6067ceefea8bcda2a51350ab3b39c36f Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Mon, 18 Oct 2021 14:48:38 +0800
+Subject: [PATCH] cec: turn off system audio mode if arc is disabled [1/1]
+
+PD#SWPL-61284
+
+Problem:
+The message of setting system audio mode is filtered.
+
+Solution:
+turn off system audio mode if arc is disabled.
+
+Verify:
+t982_ar301
+
+Change-Id: I0cdbbbd3406c1916c264935200bee7f48e29fb2a
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../core/java/com/android/server/hdmi/SystemAudioAction.java    | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/hdmi/SystemAudioAction.java b/services/core/java/com/android/server/hdmi/SystemAudioAction.java
+index 1cecd77af5d6..8c06adf804bb 100644
+--- a/services/core/java/com/android/server/hdmi/SystemAudioAction.java
++++ b/services/core/java/com/android/server/hdmi/SystemAudioAction.java
+@@ -77,7 +77,7 @@ abstract class SystemAudioAction extends HdmiCecFeatureAction {
+     }
+ 
+     private void sendSystemAudioModeRequestInternal() {
+-        if (!tv().isSystemAudioControlFeatureEnabled()) {
++        if (!tv().isSystemAudioControlFeatureEnabled() && mTargetAudioStatus) {
+             HdmiLogger.debug("Ignoring <System Audio Mode Request> message "
+                     + "because the System Audio Control feature is disabled.");
+             return;
+-- 
+2.26.1
+
