@@ -1,0 +1,558 @@
+From 0774c6f15c53a207779e8987b5c1caa54d6ddf0f Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Thu, 21 Oct 2021 16:54:27 +0800
+Subject: [PATCH] cec: support earc observing in android framework [2/2]
+
+PD# SWPL-60586
+
+Problem:
+optimization of earc feature. Observe the earc state
+in android framework, but not do it in droidlogic and
+cec hal.
+
+Solution:
+user media_prop ro.audio.support_earc to determine
+whether this platform supports earc.
+
+Verify:
+t3
+
+Change-Id: I5b19a72518cd928f951513743f16a090d7632183
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ core/java/android/os/UEventObserver.java      |   3 +-
+ .../server/hdmi/AudioSystemEarcObserver.java  |  41 +++++++
+ .../com/android/server/hdmi/EarcObserver.java | 103 ++++++++++++++++++
+ .../server/hdmi/HdmiCecLocalDevice.java       |   5 +
+ .../server/hdmi/HdmiCecLocalDeviceTv.java     |  57 +++++++++-
+ .../server/hdmi/HdmiControlService.java       |  82 ++++++++++++++
+ .../server/hdmi/HotplugDetectionAction.java   |   4 +
+ .../android/server/hdmi/TvEarcObserver.java   |  44 ++++++++
+ 8 files changed, 334 insertions(+), 5 deletions(-)
+ create mode 100755 services/core/java/com/android/server/hdmi/AudioSystemEarcObserver.java
+ create mode 100644 services/core/java/com/android/server/hdmi/EarcObserver.java
+ mode change 100755 => 100644 services/core/java/com/android/server/hdmi/HdmiControlService.java
+ create mode 100644 services/core/java/com/android/server/hdmi/TvEarcObserver.java
+
+diff --git a/core/java/android/os/UEventObserver.java b/core/java/android/os/UEventObserver.java
+index fa30e509f8cc..82dbf593ce2f 100644
+--- a/core/java/android/os/UEventObserver.java
++++ b/core/java/android/os/UEventObserver.java
+@@ -41,7 +41,7 @@ import java.util.HashMap;
+ */
+ public abstract class UEventObserver {
+     private static final String TAG = "UEventObserver";
+-    private static final boolean DEBUG = false;
++    private static final boolean DEBUG = true;
+ 
+     private static UEventThread sThread;
+ 
+@@ -163,6 +163,7 @@ public abstract class UEventObserver {
+         }
+ 
+         public String toString() {
++            mMap.forEach((k, v) -> Log.d(TAG, "key:" + k + " value:" + v));
+             return mMap.toString();
+         }
+     }
+diff --git a/services/core/java/com/android/server/hdmi/AudioSystemEarcObserver.java b/services/core/java/com/android/server/hdmi/AudioSystemEarcObserver.java
+new file mode 100755
+index 000000000000..4c3ed745288b
+--- /dev/null
++++ b/services/core/java/com/android/server/hdmi/AudioSystemEarcObserver.java
+@@ -0,0 +1,41 @@
++/*
++* Copyright (C) 2014 The Android Open Source Project
++*
++* Licensed under the Apache License, Version 2.0 (the "License");
++* you may not use this file except in compliance with the License.
++* You may obtain a copy of the License at
++*
++*      http://www.apache.org/licenses/LICENSE-2.0
++*
++* Unless required by applicable law or agreed to in writing, software
++* distributed under the License is distributed on an "AS IS" BASIS,
++* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++* See the License for the specific language governing permissions and
++* limitations under the License.
++*/
++
++package com.android.server.hdmi;
++
++public class AudioSystemEarcObserver extends EarcObserver {
++
++    public AudioSystemEarcObserver(HdmiControlService service) {
++        super(service);
++    }
++
++    protected int getCurrentConnectType(String currentConnectState) {
++        switch(currentConnectState) {
++            case EARC_RX_ENABLE_STATE:
++                return EARC_CONNECT_TYPE;
++            case ARC_RX_ENABLE_STATE:
++                return ARC_CONNECT_TYPE;
++            default:
++                return EARC_ARC_UNCONNECT_TYPE;
++        }
++    }
++
++    protected String getEvent() {
++        return PATH_EARC_UEVENT;
++    }
++
++}
++
+diff --git a/services/core/java/com/android/server/hdmi/EarcObserver.java b/services/core/java/com/android/server/hdmi/EarcObserver.java
+new file mode 100644
+index 000000000000..2be9b081a4af
+--- /dev/null
++++ b/services/core/java/com/android/server/hdmi/EarcObserver.java
+@@ -0,0 +1,103 @@
++/*
++ * Copyright (C) 2014 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.server.hdmi;
++
++
++import android.hardware.hdmi.HdmiDeviceInfo;
++import android.os.UEventObserver;
++import android.os.FileUtils;
++import android.os.SystemProperties;
++
++import android.util.Slog;
++
++import java.io.File;
++
++public abstract class EarcObserver extends UEventObserver {
++    private static final String TAG = "EarcObserver";
++
++    private static final String PROP_SUPPORT_EARC = "ro.vendor.media.support_earc";
++
++    public static final String EARC_TX_NONE_STATE = "0";//"EARCTX-ARC=0EARCTX-EARC=0";
++    public static final String ARC_TX_ENABLE_STATE = "1";//"EARCTX-ARC=1EARCTX-EARC=0";
++    public static final String EARC_TX_ENABLE_STATE = "2";//"EARCTX-ARC=0EARCTX-EARC=1";
++
++    public static final String EARC_RX_ENABLE_STATE = "EARCRX-ARC=0EARCRX-EARC=1";
++    public static final String ARC_RX_ENABLE_STATE = "EARCRX-ARC=1EARCRX-EARC=0";
++
++    public static final String PATH_EARC_UEVENT = "/devices/platform/soc/";
++
++    private static final String KEY_STATE = "EARCTX_ARC_STATE";
++
++    public static final int EARC_ARC_UNCONNECT_TYPE = 0;
++    public static final int ARC_CONNECT_TYPE = 1;
++    public static final int EARC_CONNECT_TYPE = 2;
++
++    private static final boolean SUPPORT_EARC = SystemProperties.getBoolean(PROP_SUPPORT_EARC, false);
++
++    private int mCurrentConnectType;
++    private HdmiControlService mService;
++
++    public EarcObserver(HdmiControlService service) {
++        mService = service;
++        startObserving(getEvent());
++    }
++
++    @Override
++    public void onUEvent(UEvent event) {
++        Slog.d(TAG, "onUEvent =" + event);
++        String state = event.get(KEY_STATE);
++        Slog.d(TAG, "onUEvent state=" + state);
++
++        if (null == state) {
++            return;
++        }
++
++        int connectType = getCurrentConnectType(state.replaceAll("\n", ""));
++        Slog.d(TAG, "onUEvent new=" + connectType + " current=" + mCurrentConnectType);
++        if (mCurrentConnectType == connectType) {
++            Slog.d(TAG, "connect type no change");
++            return;
++        }
++        mCurrentConnectType = connectType;
++        mService.onEarcStateChanged(isEarcOn());
++    }
++
++    public static EarcObserver ceateEarcObserver(HdmiControlService service, int deviceType) {
++        switch (deviceType) {
++            case HdmiDeviceInfo.DEVICE_TV:
++                return new TvEarcObserver(service);
++            case HdmiDeviceInfo.DEVICE_AUDIO_SYSTEM:
++                return new AudioSystemEarcObserver(service);
++            default:
++                Slog.e(TAG, "ceateEarcObserver should never be here");
++                return null;
++        }
++    }
++
++    public static boolean isEarcSupport() {
++        return SUPPORT_EARC;
++    }
++
++    public boolean isEarcOn() {
++        return mCurrentConnectType == EARC_CONNECT_TYPE;
++    }
++
++    protected abstract int getCurrentConnectType(String currentConnectState);
++
++    protected abstract String getEvent();
++}
++
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevice.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevice.java
+index 555619d5a336..b1e22f162f88 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevice.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevice.java
+@@ -1143,6 +1143,11 @@ abstract class HdmiCecLocalDevice {
+                 HdmiCecMessageBuilder.buildUserControlReleased(mAddress, targetAddress));
+     }
+ 
++    protected boolean mEarcOn = false;
++    protected void onEarcStateChanged(boolean earcOn) {
++        HdmiLogger.info("onEarcStateChanged current:" + mEarcOn + " new:" + earcOn);
++    }
++
+     /** Dump internal status of HdmiCecLocalDevice object. */
+     protected void dump(final IndentingPrintWriter pw) {
+         pw.println("mDeviceType: " + mDeviceType);
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+index 9854d64815ea..a780f06482d9 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+@@ -221,6 +221,35 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+         startQueuedActions();
+     }
+ 
++    public boolean isEarcOn() {
++        return mEarcOn;
++    }
++
++    protected void onEarcStateChanged(boolean earcOn) {
++        super.onEarcStateChanged(earcOn);
++        if (mEarcOn == earcOn) {
++            return;
++        }
++        mEarcOn = earcOn;
++        HdmiLogger.info("onEarcStateChanged current earc state:" + mEarcOn);
++        updateEarcState(earcOn);
++    }
++
++    private void updateEarcState(boolean earcOn) {
++        HdmiLogger.info("updateEarcState:" + earcOn);
++        updateAudioManagerForSystemAudio(earcOn);
++        mService.getAudioManager().setWiredDeviceConnectionState(
++                AudioSystem.DEVICE_OUT_HDMI_ARC, (earcOn ? 1 : 0), "", "");
++        mService.getAudioManager().setParameters("HDMI ARC Switch=" + (earcOn ? 1 : 0));
++        mService.getAudioManager().setParameters("speaker_mute=" + (earcOn ? 1 : 0));
++        if (!earcOn) {
++            mService.getAudioManager().setParameters("set_ARC_format=[2, 0, 0, 0, 0]");
++            mService.getAudioManager().setParameters("set_ARC_format=[7, 0, 0, 0, 0]");
++            mService.getAudioManager().setParameters("set_ARC_format=[10, 0, 0, 0, 0]");
++            mService.getAudioManager().setParameters("set_ARC_format=[11, 0, 0, 0, 0]");
++        }
++    }
++
+     @ServiceThreadOnly
+     private List<Integer> initLocalDeviceAddresses() {
+         assertRunOnServiceThread();
+@@ -841,7 +870,11 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+         HdmiLogger.debug("onNewAvrAdded " + avr);
+         addAndStartAction(new SystemAudioActionFromTv(this, avr.getLogicalAddress(),
+                 isSystemAudioControlFeatureEnabled(), null));
+-        if (isConnected(avr.getPortId()) && isArcFeatureEnabled(avr.getPortId())
++        if (isEarcOn()) {
++            HdmiLogger.info("No need to start system arc for earc on");
++            return;
++        }
++        if (isArcFeatureEnabled(avr.getPortId())
+                 && !hasAction(SetArcTransmissionStateAction.class)) {
+             startArcAction(true);
+         }
+@@ -966,6 +999,12 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+ 
+         HdmiLogger.info("Set Arc Status[old:%b new:%b], and audio mode:%b",
+             mArcEstablished, enabled, mService.isSystemAudioActivated());
++
++        if (isEarcOn()) {
++            HdmiLogger.info("No need to setArcStatus for earc on");
++            return false;
++        }
++
+         if (mArcEstablished == enabled) {
+             return mArcEstablished;
+         }
+@@ -1002,7 +1041,8 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+         // Note that we don't set any name to ARC.
+         mService.getAudioManager().setWiredDeviceConnectionState(
+                 AudioSystem.DEVICE_OUT_HDMI_ARC,
+-                enabled ? 1 : 0, "", "");
++                // Either earc or arc is on, then the audio device is HDMI_ARC.
++                mEarcOn || enabled ? 1 : 0, "", "");
+     }
+ 
+     /**
+@@ -1107,7 +1147,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+             // On initialization process, getAvrDeviceInfo() may return null and cause exception
+             return;
+         }
+-        if (delta == 0 || !isSystemAudioActivated() || !mService.isHdmiCecVolumeControlEnabled()) {
++        if (delta == 0 || (!isSystemAudioActivated() && !isEarcOn()) || !mService.isHdmiCecVolumeControlEnabled()) {
+             return;
+         }
+ 
+@@ -1211,7 +1251,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+                 && isConnectedToArcPort(avr.getPhysicalAddress())
+                 && isDirectConnectAddress(avr.getPhysicalAddress())) {
+             if (enabled) {
+-                return isConnected(avr.getPortId()) && isArcFeatureEnabled(avr.getPortId());
++                return isArcFeatureEnabled(avr.getPortId());
+             } else {
+                 return true;
+             }
+@@ -1260,6 +1300,13 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+                     false, null));
+             return true;
+         }
++        if (isEarcOn()) {
++            if (systemAudioStatus)
++                updateEarcState(true);
++            else
++                updateEarcState(false);
++        }
++
+         removeAction(SystemAudioAutoInitiationAction.class);
+         SystemAudioActionFromAvr action = new SystemAudioActionFromAvr(this,
+                 message.getSource(), systemAudioStatus, null);
+@@ -1741,6 +1788,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+         // Remove any repeated working actions.
+         removeAllActions();
+ 
++        onEarcStateChanged(false);
+         disableSystemAudioIfExist();
+         disableArcIfExist();
+ 
+@@ -2039,6 +2087,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+     protected void dump(final IndentingPrintWriter pw) {
+         super.dump(pw);
+         pw.println("mArcEstablished: " + mArcEstablished);
++        pw.println("mEarcOn: " + mEarcOn);
+         pw.println("mArcFeatureEnabled: " + mArcFeatureEnabled);
+         pw.println("mSystemAudioMute: " + mSystemAudioMute);
+         pw.println("mSystemAudioControlFeatureEnabled: " + mSystemAudioControlFeatureEnabled);
+diff --git a/services/core/java/com/android/server/hdmi/HdmiControlService.java b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+old mode 100755
+new mode 100644
+index f298c6868486..f472280b3809
+--- a/services/core/java/com/android/server/hdmi/HdmiControlService.java
++++ b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+@@ -515,6 +515,7 @@ public class HdmiControlService extends SystemService {
+     @Override
+     public void onStart() {
+         Slog.i(TAG, "hdmi service start.");
++        initEarcState();
+         if (mIoLooper == null) {
+             mIoThread.start();
+             mIoLooper = mIoThread.getLooper();
+@@ -784,6 +785,48 @@ public class HdmiControlService extends SystemService {
+         }
+     }
+ 
++    /*********************EARC BEGIN************************************************/
++    private boolean mEarcSupported;
++    private EarcObserver mEarcObserver;
++
++    private void initEarcState() {
++        int deviceType = HdmiDeviceInfo.DEVICE_TV;
++        if (isTvDevice()) {
++            deviceType = HdmiDeviceInfo.DEVICE_TV;
++        } else if (isAudioSystemDevice()) {
++            deviceType = HdmiDeviceInfo.DEVICE_AUDIO_SYSTEM;
++        }
++        mEarcSupported = EarcObserver.isEarcSupport();
++        Slog.i(TAG, "initEarcState isEarcSupported " + mEarcSupported);
++
++        if (!mEarcSupported) {
++            return;
++        }
++        mEarcObserver = EarcObserver.ceateEarcObserver(this, deviceType);
++    }
++
++    public boolean isEarcSupport() {
++        return mEarcSupported;
++    }
++
++    public boolean isEarcOn() {
++        return mEarcSupported
++               && mEarcObserver.isEarcOn();
++    }
++
++    public void onEarcStateChanged(final boolean isEarcOn) {
++        runOnServiceThread(()->{
++            if (tv() != null) {
++                tv().onEarcStateChanged(isEarcOn);
++            } else if (audioSystem() != null) {
++                audioSystem().onEarcStateChanged(isEarcOn);
++            }
++        });
++
++    }
++
++    /*********************EARC END************************************************/
++
+     private static int toInt(boolean enabled) {
+         return enabled ? ENABLED : DISABLED;
+     }
+@@ -890,6 +933,9 @@ public class HdmiControlService extends SystemService {
+                         allocatedDevices.add(localDevice);
+                     }
+ 
++                    // Init earc state.
++                    localDevice.onEarcStateChanged(isEarcOn());
++
+                     // Address allocation completed for all devices. Notify each device.
+                     if (allocatingDevices.size() == ++finished[0]) {
+                         mAddressAllocated = true;
+@@ -1193,6 +1239,9 @@ public class HdmiControlService extends SystemService {
+     @ServiceThreadOnly
+     void sendCecCommand(HdmiCecMessage command, @Nullable SendMessageCallback callback) {
+         assertRunOnServiceThread();
++        if (filterForEarc(command)) {
++            return;
++        }
+         if (mMessageValidator.isValid(command) == HdmiCecMessageValidator.OK) {
+             mCecController.sendCommand(command, callback);
+         } else {
+@@ -1224,6 +1273,9 @@ public class HdmiControlService extends SystemService {
+     @ServiceThreadOnly
+     boolean handleCecCommand(HdmiCecMessage message) {
+         assertRunOnServiceThread();
++        if (filterForEarc(message)) {
++            return true;
++        }
+         int errorCode = mMessageValidator.isValid(message);
+         if (errorCode != HdmiCecMessageValidator.OK) {
+             // We'll not response on the messages with the invalid source or destination
+@@ -1241,6 +1293,34 @@ public class HdmiControlService extends SystemService {
+         return (!mAddressAllocated) ? mCecMessageBuffer.bufferMessage(message) : false;
+     }
+ 
++    private boolean filterForEarc(HdmiCecMessage cecMessage) {
++        if (isTvDevice() && isEarcOn()) {
++            switch (cecMessage.getOpcode()) {
++                // audio message from audio system
++                case Constants.MESSAGE_SYSTEM_AUDIO_MODE_REQUEST:
++                case Constants.MESSAGE_SET_SYSTEM_AUDIO_MODE:
++                    HdmiLogger.info("MESSAGE_SET_SYSTEM_AUDIO_MODE / MESSAGE_SYSTEM_AUDIO_MODE_REQUEST: message for earc on %s", cecMessage);
++                    return false;
++                case Constants.MESSAGE_SYSTEM_AUDIO_MODE_STATUS:
++                case Constants.MESSAGE_INITIATE_ARC:
++                case Constants.MESSAGE_TERMINATE_ARC:
++                    HdmiLogger.info("Ignoring receiving audio arc message for earc on %s", cecMessage);
++                    maySendFeatureAbortCommand(cecMessage, Constants.ABORT_REFUSED);
++                    return true;
++                // audio message to audio system
++                case Constants.MESSAGE_REPORT_ARC_INITIATED:
++                case Constants.MESSAGE_REPORT_ARC_TERMINATED:
++                case Constants.MESSAGE_REQUEST_ARC_INITIATION:
++                case Constants.MESSAGE_REQUEST_ARC_TERMINATION:
++                    HdmiLogger.info("Ignoring sending audio arc message for earc on %s", cecMessage);
++                    return true;
++                default:
++                    return false;
++            }
++        }
++        return false;
++    }
++
+     void enableAudioReturnChannel(int portId, boolean enabled) {
+         mCecController.enableAudioReturnChannel(portId, enabled);
+     }
+@@ -2390,6 +2470,8 @@ public class HdmiControlService extends SystemService {
+ 
+             pw.println("mProhibitMode: " + mProhibitMode);
+             pw.println("mPowerStatus: " + mPowerStatus);
++            pw.decreaseIndent();
++            pw.println("mEarcSupported: " + mEarcSupported);
+ 
+             // System settings
+             pw.println("System_settings:");
+diff --git a/services/core/java/com/android/server/hdmi/HotplugDetectionAction.java b/services/core/java/com/android/server/hdmi/HotplugDetectionAction.java
+index 9145762936bc..13a600959ce5 100644
+--- a/services/core/java/com/android/server/hdmi/HotplugDetectionAction.java
++++ b/services/core/java/com/android/server/hdmi/HotplugDetectionAction.java
+@@ -269,6 +269,10 @@ final class HotplugDetectionAction extends HdmiCecFeatureAction {
+         if (HdmiUtils.getTypeFromAddress(address) != HdmiDeviceInfo.DEVICE_AUDIO_SYSTEM) {
+             return;
+         }
++        if (tv().isEarcOn()) {
++            HdmiLogger.info("No need to turn off system audio for earc on");
++            return;
++        }
+ 
+         tv().setSystemAudioMode(false);
+     }
+diff --git a/services/core/java/com/android/server/hdmi/TvEarcObserver.java b/services/core/java/com/android/server/hdmi/TvEarcObserver.java
+new file mode 100644
+index 000000000000..1eb1b9628192
+--- /dev/null
++++ b/services/core/java/com/android/server/hdmi/TvEarcObserver.java
+@@ -0,0 +1,44 @@
++/*
++* Copyright (C) 2014 The Android Open Source Project
++*
++* Licensed under the Apache License, Version 2.0 (the "License");
++* you may not use this file except in compliance with the License.
++* You may obtain a copy of the License at
++*
++*      http://www.apache.org/licenses/LICENSE-2.0
++*
++* Unless required by applicable law or agreed to in writing, software
++* distributed under the License is distributed on an "AS IS" BASIS,
++* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++* See the License for the specific language governing permissions and
++* limitations under the License.
++*/
++
++package com.android.server.hdmi;
++
++import android.os.FileUtils;
++
++public class TvEarcObserver extends EarcObserver {
++
++    public TvEarcObserver(HdmiControlService service) {
++        super(service);
++    }
++
++    protected int getCurrentConnectType(String currentConnectState) {
++        switch(currentConnectState) {
++            case EARC_TX_ENABLE_STATE:
++                return EARC_CONNECT_TYPE;
++            case ARC_TX_ENABLE_STATE:
++                return ARC_CONNECT_TYPE;
++            case EARC_TX_NONE_STATE:
++                return EARC_ARC_UNCONNECT_TYPE;
++            default:
++                return EARC_ARC_UNCONNECT_TYPE;
++        }
++    }
++
++    protected String getEvent() {
++        return PATH_EARC_UEVENT;
++    }
++
++}
+-- 
+2.26.1
+
