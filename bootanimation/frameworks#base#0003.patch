@@ -1,0 +1,43 @@
+From fa3aeb5a66af335523d2cb69507b719b89495ad6 Mon Sep 17 00:00:00 2001
+From: "hongchao.yin" <hongchao.yin@amlogic.com>
+Date: Fri, 29 Oct 2021 10:01:28 +0800
+Subject: [PATCH] BootAnimation: set prop 1 while playing bootvideo [1/1]
+
+PD#SWPL-61579
+
+Problem:
+{T3}{Android R}{Audio}Software update or factory reset,
+the boot video no audio when first enter system. (5/5, T3 Android P OK)
+
+Solution:
+set prop 1 while playing bootvideo
+
+Verify:
+redi + R
+
+Change-Id: I307cb3d1a46f8fa7c2041225675c6f2c6f8cca70
+Signed-off-by: hongchao.yin <hongchao.yin@amlogic.com>
+---
+ cmds/bootanimation/BootAnimation.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+ mode change 100755 => 100644 cmds/bootanimation/BootAnimation.cpp
+
+diff --git a/cmds/bootanimation/BootAnimation.cpp b/cmds/bootanimation/BootAnimation.cpp
+old mode 100755
+new mode 100644
+index 5a9f8072ce4c..59c8a7f50cc9
+--- a/cmds/bootanimation/BootAnimation.cpp
++++ b/cmds/bootanimation/BootAnimation.cpp
+@@ -1282,7 +1282,8 @@ bool BootAnimation::threadLoop() {
+     bool result = false;
+     // We have no bootanimation file, so we use the stock android logo
+     // animation.
+-
++    SLOGD("BootAnimation::threadLoop");
++    property_set(BOOT_VIDEO_RUNNING_STATUS_PROP_NAME, "1");
+     if (mZipFileName.isEmpty()) {
+         result = android();
+     } else {
+-- 
+2.25.1
+
