@@ -1,0 +1,98 @@
+From 6de87ff050e0cf9dc9d9267459101fe0b19863bc Mon Sep 17 00:00:00 2001
+From: baocheng sun <baocheng.sun@amlogic.com>
+Date: Mon, 25 Oct 2021 16:47:28 +0800
+Subject: [PATCH] surfaceflinger: fix IGBPs list leak
+
+PD#OTT-24826
+
+Problem:
+Suspected IGBP leak: 4097 IGBPs (4096 max)
+
+Solution:
+Remove IGBP from list when BufferQueueLayer destroy
+
+Verify:
+STB
+
+Change-Id: I58495bfae0e8c47cf6b63bb2bd4977b704ee6a51
+Signed-off-by: baocheng sun <baocheng.sun@amlogic.com>
+---
+ services/surfaceflinger/BufferQueueLayer.cpp  |  1 +
+ services/surfaceflinger/MonitoredProducer.cpp | 20 +++++++++++++------
+ services/surfaceflinger/MonitoredProducer.h   |  2 ++
+ 3 files changed, 17 insertions(+), 6 deletions(-)
+
+diff --git a/services/surfaceflinger/BufferQueueLayer.cpp b/services/surfaceflinger/BufferQueueLayer.cpp
+index 09c10e04e4..36492c2e0b 100644
+--- a/services/surfaceflinger/BufferQueueLayer.cpp
++++ b/services/surfaceflinger/BufferQueueLayer.cpp
+@@ -41,6 +41,7 @@ BufferQueueLayer::BufferQueueLayer(const LayerCreationArgs& args) : BufferLayer(
+ BufferQueueLayer::~BufferQueueLayer() {
+     mContentsChangedListener->abandon();
+     mConsumer->abandon();
++    (static_cast<MonitoredProducer*>(mProducer.get()))->abandon();
+ }
+ 
+ // -----------------------------------------------------------------------
+diff --git a/services/surfaceflinger/MonitoredProducer.cpp b/services/surfaceflinger/MonitoredProducer.cpp
+index 6b2d745998..e3b97b4489 100644
+--- a/services/surfaceflinger/MonitoredProducer.cpp
++++ b/services/surfaceflinger/MonitoredProducer.cpp
+@@ -31,14 +31,11 @@ MonitoredProducer::MonitoredProducer(const sp<IGraphicBufferProducer>& producer,
+         const wp<Layer>& layer) :
+     mProducer(producer),
+     mFlinger(flinger),
+-    mLayer(layer) {}
++    mLayer(layer),
++    mAbandoned(false) {}
+ 
+ MonitoredProducer::~MonitoredProducer() {
+-    // Remove ourselves from SurfaceFlinger's list. We do this asynchronously
+-    // because we don't know where this destructor is called from. It could be
+-    // called with the mStateLock held, leading to a dead-lock (it actually
+-    // happens).
+-    mFlinger->removeGraphicBufferProducerAsync(onAsBinder());
++    abandon();
+ }
+ 
+ status_t MonitoredProducer::requestBuffer(int slot, sp<GraphicBuffer>* buf) {
+@@ -169,6 +166,17 @@ sp<Layer> MonitoredProducer::getLayer() const {
+     return mLayer.promote();
+ }
+ 
++void MonitoredProducer::abandon() {
++    if (!mAbandoned) {
++        // Remove ourselves from SurfaceFlinger's list. We do this asynchronously
++        // because we don't know where this destructor is called from. It could be
++        // called with the mStateLock held, leading to a dead-lock (it actually
++        // happens).
++        mFlinger->removeGraphicBufferProducerAsync(onAsBinder());
++        mAbandoned = true;
++    }
++}
++
+ // ---------------------------------------------------------------------------
+ }; // namespace android
+ 
+diff --git a/services/surfaceflinger/MonitoredProducer.h b/services/surfaceflinger/MonitoredProducer.h
+index 3778277fd3..274de5c890 100644
+--- a/services/surfaceflinger/MonitoredProducer.h
++++ b/services/surfaceflinger/MonitoredProducer.h
+@@ -76,12 +76,14 @@ public:
+ 
+     // The Layer which created this producer, and on which queued Buffer's will be displayed.
+     sp<Layer> getLayer() const;
++    void abandon();
+ 
+ private:
+     sp<IGraphicBufferProducer> mProducer;
+     sp<SurfaceFlinger> mFlinger;
+     // The Layer which created this producer, and on which queued Buffer's will be displayed.
+     wp<Layer> mLayer;
++    bool mAbandoned;
+ };
+ 
+ }; // namespace android
+-- 
+2.26.1
+
