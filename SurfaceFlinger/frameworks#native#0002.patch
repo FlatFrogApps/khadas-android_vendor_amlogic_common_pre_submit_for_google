@@ -1,0 +1,42 @@
+From 9b6e58a88cdde95b1f533022744b45e8dd48532d Mon Sep 17 00:00:00 2001
+From: baocheng sun <baocheng.sun@amlogic.com>
+Date: Sun, 27 Dec 2020 21:27:36 -0500
+Subject: [PATCH] SurfaceFlinger: update sideband hnd when layer queued buffer. [1/1]
+
+PD#39639
+BUG=176557125
+
+Problem:
+Sideband cann't displayed blank frame when layer disconnect
+
+Solution:
+update sideband when new frame set
+
+Verify:
+sc2
+
+Change-Id: I30714a6f5e9bef8deae6937ea29111666f731459
+Signed-off-by: baocheng sun <baocheng.sun@amlogic.com>
+---
+
+diff --git a/services/surfaceflinger/BufferQueueLayer.cpp b/services/surfaceflinger/BufferQueueLayer.cpp
+index 6e4235e..1e159ee 100644
+--- a/services/surfaceflinger/BufferQueueLayer.cpp
++++ b/services/surfaceflinger/BufferQueueLayer.cpp
+@@ -208,8 +208,15 @@
+ }
+ 
+ bool BufferQueueLayer::latchSidebandStream(bool& recomputeVisibleRegions) {
++    bool updateSidebandStream = false;
++    if (hasFrameUpdate() && mSidebandStream.get()) {
++        ALOGD("[%s] have both sidebandstream & buffer, need update sideband.", getDebugName());
++        updateSidebandStream = true;
++    }
++
+     bool sidebandStreamChanged = true;
+-    if (mSidebandStreamChanged.compare_exchange_strong(sidebandStreamChanged, false)) {
++    if (mSidebandStreamChanged.compare_exchange_strong(sidebandStreamChanged, false)
++        || updateSidebandStream) {
+         // mSidebandStreamChanged was changed to false
+         mSidebandStream = mConsumer->getSidebandStream();
+         auto* layerCompositionState = editCompositionState();
