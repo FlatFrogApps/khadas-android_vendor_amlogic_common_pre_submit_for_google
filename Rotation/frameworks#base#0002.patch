@@ -1,0 +1,328 @@
+From ddec91346f53430b3d64f032348c443e9bce3895 Mon Sep 17 00:00:00 2001
+From: Zhuying <zhuying.li@amlogic.com>
+Date: Fri, 19 Nov 2021 09:56:38 +0800
+Subject: [PATCH] Display: Screen can not rotate with command [1/1]
+
+PD#SWPL-64421
+
+Problem:
+Screen can not rotate with command :
+settings put system user_rotation  0/1/2/3
+User rotation was disabled by SWPL-62389
+
+Solution:
+Enable user rotation and realize dual-screen rotation function
+
+Verify:
+Verify on T7 and T3 platform
+
+Signed-off-by: Zhuying <zhuying.li@amlogic.com>
+Change-Id: I537038261260d528ecaaf8550f97f8805a565c67
+---
+ cmds/bootanimation/BootAnimation.cpp          |  7 +++--
+ .../display/DisplayManagerInternal.java       |  5 ----
+ .../server/display/DisplayManagerService.java | 12 +-------
+ .../server/display/LocalDisplayAdapter.java   |  3 +-
+ .../server/display/LogicalDisplay.java        | 14 +++------
+ .../com/android/server/wm/DisplayContent.java |  1 -
+ .../android/server/wm/DisplayRotation.java    | 30 ++++++++++++-------
+ .../server/wm/DisplayWindowSettings.java      |  8 +++--
+ 8 files changed, 36 insertions(+), 44 deletions(-)
+
+diff --git a/cmds/bootanimation/BootAnimation.cpp b/cmds/bootanimation/BootAnimation.cpp
+index 9955db0384a8..6cc3d949edf2 100644
+--- a/cmds/bootanimation/BootAnimation.cpp
++++ b/cmds/bootanimation/BootAnimation.cpp
+@@ -835,9 +835,10 @@ BootAnimation::BootAnimation(sp<Callbacks> callbacks)
+     } else {
+         mShuttingDown = true;
+     }
+-    char rotate[PROPERTY_VALUE_MAX];
+-    if (property_get("persist.sys.builtinrotation", rotate, "0") > 0)
+-        mRotation = (ui::Rotation)atoi(rotate);
++
++    int rotate = android::base::GetIntProperty("persist.sys.builtinrotation", 0);
++    if (rotate != 0)
++        mRotation = (ui::Rotation) rotate;
+     else
+         ALOGD("BootAnimation get property error\n");
+ 
+diff --git a/core/java/android/hardware/display/DisplayManagerInternal.java b/core/java/android/hardware/display/DisplayManagerInternal.java
+index 745e0beca8e1..8d6e937488e4 100644
+--- a/core/java/android/hardware/display/DisplayManagerInternal.java
++++ b/core/java/android/hardware/display/DisplayManagerInternal.java
+@@ -150,11 +150,6 @@ public abstract class DisplayManagerInternal {
+      */
+     public abstract void performTraversal(Transaction t);
+ 
+-    /**
+-     * Called by the window manager to set rotation for display.
+-     */
+-    public abstract void setRotation(int newRotation);
+-
+     /**
+      * Tells the display manager about properties of the display that depend on the windows on it.
+      * This includes whether there is interesting unique content on the specified logical display,
+diff --git a/services/core/java/com/android/server/display/DisplayManagerService.java b/services/core/java/com/android/server/display/DisplayManagerService.java
+index 29f80970185c..713f9c8f173d 100644
+--- a/services/core/java/com/android/server/display/DisplayManagerService.java
++++ b/services/core/java/com/android/server/display/DisplayManagerService.java
+@@ -1573,7 +1573,7 @@ public final class DisplayManagerService extends SystemService {
+                     + device.getDisplayDeviceInfoLocked());
+             return;
+         }
+-        display.configureDisplayLocked(t, device, info.state == Display.STATE_OFF, getRotation());
++        display.configureDisplayLocked(t, device, info.state == Display.STATE_OFF);
+         final Optional<Integer> viewportType = getViewportType(info);
+         if (viewportType.isPresent()) {
+             populateViewportLocked(viewportType.get(), display.getDisplayIdLocked(), device, info);
+@@ -2529,11 +2529,6 @@ public final class DisplayManagerService extends SystemService {
+         }
+     }
+ 
+-
+-    public int mRotation = 0;
+-    public int getRotation() {
+-        return mRotation;
+-    }
+     private final class LocalService extends DisplayManagerInternal {
+ 
+         @Override
+@@ -2633,11 +2628,6 @@ public final class DisplayManagerService extends SystemService {
+             getNonOverrideDisplayInfoInternal(displayId, outInfo);
+         }
+ 
+-        @Override
+-        public void setRotation(int newRotation) {
+-            mRotation = newRotation;
+-        }
+-
+         @Override
+         public void performTraversal(SurfaceControl.Transaction t) {
+             performTraversalInternal(t);
+diff --git a/services/core/java/com/android/server/display/LocalDisplayAdapter.java b/services/core/java/com/android/server/display/LocalDisplayAdapter.java
+index f39d2ab89627..43806dda0ab7 100644
+--- a/services/core/java/com/android/server/display/LocalDisplayAdapter.java
++++ b/services/core/java/com/android/server/display/LocalDisplayAdapter.java
+@@ -573,13 +573,12 @@ final class LocalDisplayAdapter extends DisplayAdapter {
+                 } else {
+                     mInfo.type = Display.TYPE_EXTERNAL;
+                     mInfo.touch = DisplayDeviceInfo.TOUCH_EXTERNAL;
+-                    mInfo.flags |= DisplayDeviceInfo.FLAG_PRESENTATION;
++                    mInfo.flags |= DisplayDeviceInfo.FLAG_ROTATES_WITH_CONTENT;
+                     mInfo.name = getContext().getResources().getString(
+                             com.android.internal.R.string.display_manager_hdmi_display_name);
+                 }
+                 // The display is trusted since it is created by system.
+                 mInfo.flags |= DisplayDeviceInfo.FLAG_TRUSTED;
+-                mInfo.rotation = SystemProperties.getInt("persist.sys.hdmirotation", 0);
+             }
+             return mInfo;
+         }
+diff --git a/services/core/java/com/android/server/display/LogicalDisplay.java b/services/core/java/com/android/server/display/LogicalDisplay.java
+index a7b6f8dabe1a..11c8168b8d3d 100644
+--- a/services/core/java/com/android/server/display/LogicalDisplay.java
++++ b/services/core/java/com/android/server/display/LogicalDisplay.java
+@@ -19,6 +19,7 @@ package com.android.server.display;
+ import android.graphics.Point;
+ import android.graphics.Rect;
+ import android.hardware.display.DisplayManagerInternal;
++import android.os.SystemProperties;
+ import android.view.Display;
+ import android.view.DisplayInfo;
+ import android.view.Surface;
+@@ -66,6 +67,7 @@ final class LogicalDisplay {
+ 
+     private final int mDisplayId;
+     private final int mLayerStack;
++    private String mBuiltInUserRotation = SystemProperties.get("persist.sys.builtinrotation", "");
+     /**
+      * Override information set by the window manager. Will be reported instead of {@link #mInfo}
+      * if not null.
+@@ -372,7 +374,7 @@ final class LogicalDisplay {
+      */
+     public void configureDisplayLocked(SurfaceControl.Transaction t,
+             DisplayDevice device,
+-            boolean isBlanked, int rotation) {
++            boolean isBlanked) {
+         // Set the layer stack.
+         device.setLayerStackLocked(t, isBlanked ? BLANK_LAYER_STACK : mLayerStack);
+ 
+@@ -407,10 +409,6 @@ final class LogicalDisplay {
+             orientation = displayInfo.rotation;
+         }
+ 
+-        if (displayDeviceInfo.type == Display.TYPE_INTERNAL){
+-            displayDeviceInfo.rotation = rotation;
+-        }
+-
+         // Apply the physical rotation of the display device itself.
+         orientation = (orientation + displayDeviceInfo.rotation) % 4;
+ 
+@@ -448,11 +446,7 @@ final class LogicalDisplay {
+             displayRectHeight = displayInfo.logicalHeight * physWidth / displayInfo.logicalWidth;
+         } else {
+             // Pillar box.
+-            if (physWidth > physHeight && displayInfo.logicalWidth > displayInfo.logicalHeight) {
+-                displayRectWidth = physWidth;
+-            } else {
+-                displayRectWidth = displayInfo.logicalWidth * physHeight / displayInfo.logicalHeight;
+-            }
++            displayRectWidth = displayInfo.logicalWidth * physHeight / displayInfo.logicalHeight;
+             displayRectHeight = physHeight;
+ 
+         }
+diff --git a/services/core/java/com/android/server/wm/DisplayContent.java b/services/core/java/com/android/server/wm/DisplayContent.java
+index 5ed539f20b76..f1b110de37ac 100644
+--- a/services/core/java/com/android/server/wm/DisplayContent.java
++++ b/services/core/java/com/android/server/wm/DisplayContent.java
+@@ -1737,7 +1737,6 @@ class DisplayContent extends WindowContainer<DisplayContent.DisplayChildWindowCo
+             w.seamlesslyRotateIfAllowed(transaction, oldRotation, rotation, rotateSeamlessly);
+         }, true /* traverseTopToBottom */);
+ 
+-        mWmService.mDisplayManagerInternal.setRotation(rotation % 2);
+         mWmService.mDisplayManagerInternal.performTraversal(transaction);
+         scheduleAnimation();
+ 
+diff --git a/services/core/java/com/android/server/wm/DisplayRotation.java b/services/core/java/com/android/server/wm/DisplayRotation.java
+index 7a66095c771b..aa04975d8785 100644
+--- a/services/core/java/com/android/server/wm/DisplayRotation.java
++++ b/services/core/java/com/android/server/wm/DisplayRotation.java
+@@ -120,7 +120,7 @@ public class DisplayRotation {
+      * @see #updateRotationUnchecked
+      */
+     @Surface.Rotation
+-    private int mRotation = SystemProperties.getInt("persist.sys.builtinrotation", 0);
++    private int mRotation;
+ 
+     @VisibleForTesting
+     int mLandscapeRotation;  // default landscape
+@@ -177,7 +177,8 @@ public class DisplayRotation {
+     private int mUserRotationMode = WindowManagerPolicy.USER_ROTATION_FREE;
+ 
+     @Surface.Rotation
+-    private int mUserRotation = SystemProperties.getInt("persist.sys.builtinrotation", 0);
++    private int mUserRotation = Surface.ROTATION_0;
++    private String mBuiltInUserRotation = SystemProperties.get("persist.sys.builtinrotation", "");
+ 
+     /**
+      * Flag that indicates this is a display that may run better when fixed to user rotation.
+@@ -189,7 +190,7 @@ public class DisplayRotation {
+      * regardless of all other states (including app requrested orientation). {@code true} the
+      * display rotation should be fixed to user specified rotation, {@code false} otherwise.
+      */
+-    private int mFixedToUserRotation = IWindowManager.FIXED_TO_USER_ROTATION_DISABLED;
++    private int mFixedToUserRotation = IWindowManager.FIXED_TO_USER_ROTATION_DEFAULT;
+ 
+     private int mDemoHdmiRotation;
+     private int mDemoRotation;
+@@ -245,6 +246,11 @@ public class DisplayRotation {
+         mDeskDockRotation = readRotation(R.integer.config_deskDockRotation);
+         mUndockedHdmiRotation = readRotation(R.integer.config_undockedHdmiRotation);
+ 
++        if (mBuiltInUserRotation != null && !mBuiltInUserRotation.isEmpty()) {
++            mUserRotation = Integer.parseInt(mBuiltInUserRotation) % 4;
++            mRotation = mUserRotation;
++        }
++
+         if (isDefaultDisplay) {
+             final Handler uiHandler = UiThread.getHandler();
+             mOrientationListener = new OrientationListener(mContext, uiHandler);
+@@ -285,8 +291,8 @@ public class DisplayRotation {
+     void configure(int width, int height, int shortSizeDp, int longSizeDp) {
+         final Resources res = mContext.getResources();
+         if (width > height) {
+-            mLandscapeRotation = SystemProperties.getInt("persist.sys.builtinrotation", 0);
+-            mSeascapeRotation = (mLandscapeRotation + 2) % 4;
++            mLandscapeRotation = Surface.ROTATION_0;
++            mSeascapeRotation = Surface.ROTATION_180;
+             if (res.getBoolean(R.bool.config_reverseDefaultRotation)) {
+                 mPortraitRotation = Surface.ROTATION_90;
+                 mUpsideDownRotation = Surface.ROTATION_270;
+@@ -295,8 +301,8 @@ public class DisplayRotation {
+                 mUpsideDownRotation = Surface.ROTATION_90;
+             }
+         } else {
+-            mPortraitRotation = SystemProperties.getInt("persist.sys.builtinrotation", 0);
+-            mUpsideDownRotation = (mLandscapeRotation + 2) % 4;
++            mPortraitRotation = Surface.ROTATION_0;
++            mUpsideDownRotation = Surface.ROTATION_180;
+             if (res.getBoolean(R.bool.config_reverseDefaultRotation)) {
+                 mLandscapeRotation = Surface.ROTATION_270;
+                 mSeascapeRotation = Surface.ROTATION_90;
+@@ -1088,7 +1094,7 @@ public class DisplayRotation {
+         if (!isDefaultDisplay) {
+             // For secondary displays we ignore things like displays sensors, docking mode and
+             // rotation lock, and always prefer user rotation.
+-            preferredRotation = SystemProperties.getInt("persist.sys.builtinrotation", 0);
++            preferredRotation = mUserRotation;
+         } else if (lidState == LID_OPEN && mLidOpenRotation >= 0) {
+             // Ignore sensor when lid switch is open and rotation is forced.
+             preferredRotation = mLidOpenRotation;
+@@ -1240,7 +1246,7 @@ public class DisplayRotation {
+                 if (preferredRotation >= 0) {
+                     return preferredRotation;
+                 }
+-                return SystemProperties.getInt("persist.sys.builtinrotation", 0);
++                return Surface.ROTATION_0;
+         }
+     }
+ 
+@@ -1395,9 +1401,13 @@ public class DisplayRotation {
+ 
+             // Configure rotation lock.
+             int userRotation = Settings.System.getIntForUser(resolver,
+-                    Settings.System.USER_ROTATION, SystemProperties.getInt("persist.sys.builtinrotation", 0),
++                    Settings.System.USER_ROTATION, Surface.ROTATION_0,
+                     UserHandle.USER_CURRENT);
+ 
++            if (mBuiltInUserRotation != null && !mBuiltInUserRotation.isEmpty()) {
++                userRotation = Integer.parseInt(mBuiltInUserRotation) % 4;
++            }
++
+             if (mUserRotation != userRotation) {
+                 mUserRotation = userRotation;
+                 shouldUpdateRotation = true;
+diff --git a/services/core/java/com/android/server/wm/DisplayWindowSettings.java b/services/core/java/com/android/server/wm/DisplayWindowSettings.java
+index b48cd0812e32..d60478356b05 100644
+--- a/services/core/java/com/android/server/wm/DisplayWindowSettings.java
++++ b/services/core/java/com/android/server/wm/DisplayWindowSettings.java
+@@ -82,6 +82,7 @@ class DisplayWindowSettings {
+     private final WindowManagerService mService;
+     private final HashMap<String, Entry> mEntries = new HashMap<>();
+     private final SettingPersister mStorage;
++    private static String mBuiltInUserRotation = SystemProperties.get("persist.sys.builtinrotation", "");
+ 
+     /**
+      * The preferred type of a display identifier to use when storing and retrieving entries.
+@@ -103,7 +104,7 @@ class DisplayWindowSettings {
+         private final String mName;
+         private int mWindowingMode = WindowConfiguration.WINDOWING_MODE_UNDEFINED;
+         private int mUserRotationMode = WindowManagerPolicy.USER_ROTATION_FREE;
+-        private int mUserRotation = SystemProperties.getInt("persist.sys.builtinrotation", 0);
++        private int mUserRotation = Surface.ROTATION_0;
+         private int mForcedWidth;
+         private int mForcedHeight;
+         private int mForcedDensity;
+@@ -112,7 +113,7 @@ class DisplayWindowSettings {
+         private boolean mShouldShowWithInsecureKeyguard = false;
+         private boolean mShouldShowSystemDecors = false;
+         private boolean mShouldShowIme = false;
+-        private int mFixedToUserRotation = IWindowManager.FIXED_TO_USER_ROTATION_DISABLED;
++        private int mFixedToUserRotation = IWindowManager.FIXED_TO_USER_ROTATION_DEFAULT;
+ 
+         private Entry(String name) {
+             mName = name;
+@@ -515,6 +516,9 @@ class DisplayWindowSettings {
+                     WindowManagerPolicy.USER_ROTATION_FREE);
+             entry.mUserRotation = getIntAttribute(parser, "userRotation",
+                     Surface.ROTATION_0);
++            if (mBuiltInUserRotation != null && !mBuiltInUserRotation.isEmpty()) {
++                entry.mUserRotation = Integer.parseInt(mBuiltInUserRotation) % 4;
++            }
+             entry.mForcedWidth = getIntAttribute(parser, "forcedWidth");
+             entry.mForcedHeight = getIntAttribute(parser, "forcedHeight");
+             entry.mForcedDensity = getIntAttribute(parser, "forcedDensity");
+-- 
+2.25.1
+
