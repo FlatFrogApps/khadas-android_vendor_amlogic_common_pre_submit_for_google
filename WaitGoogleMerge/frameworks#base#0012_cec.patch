@@ -1,17 +1,17 @@
-From 6859468d0878b4310f73d301041685323eaa82d8 Mon Sep 17 00:00:00 2001
+From 573b8ee267fc8f32184db5fec89010c5471bdf50 Mon Sep 17 00:00:00 2001
 From: "an.xi" <an.xi@amlogic.com>
 Date: Mon, 8 Nov 2021 19:07:51 +0800
 Subject: [PATCH] cec: make sure mute key works all right for audio system
  [1/1]
 
-PD#SWPL-61812
+PD#SWPL-65617
 
 Problem:
 The mute key may fail to control the audio system device.
 
 Solution:
 1.Update the mute status in HdmiCecLocalDeviceTv.
-2.No need to change turn off system audio mode if earc is on.
+2.Send a mute key if the avr is muted when arc is established.
 
 Verify:
 t982_r301
@@ -21,9 +21,9 @@ Signed-off-by: an.xi <an.xi@amlogic.com>
 ---
  .../server/hdmi/HdmiCecFeatureAction.java     |  1 +
  .../server/hdmi/HdmiCecLocalDeviceTv.java     | 11 +++--
- .../server/hdmi/SystemAudioStatusAction.java  |  2 +-
+ .../server/hdmi/SystemAudioStatusAction.java  |  9 +++--
  .../server/hdmi/VolumeControlAction.java      | 40 ++++++++-----------
- 4 files changed, 26 insertions(+), 28 deletions(-)
+ 4 files changed, 31 insertions(+), 30 deletions(-)
  mode change 100755 => 100644 services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
 
 diff --git a/services/core/java/com/android/server/hdmi/HdmiCecFeatureAction.java b/services/core/java/com/android/server/hdmi/HdmiCecFeatureAction.java
@@ -85,18 +85,43 @@ index a780f06482d9..6e6f39e667fa
              HdmiLogger.debug("[A]:System audio is not activated.");
              return;
 diff --git a/services/core/java/com/android/server/hdmi/SystemAudioStatusAction.java b/services/core/java/com/android/server/hdmi/SystemAudioStatusAction.java
-index 5d913d12b79f..bfe42e524290 100644
+index 5d913d12b79f..896cb2c881db 100644
 --- a/services/core/java/com/android/server/hdmi/SystemAudioStatusAction.java
 +++ b/services/core/java/com/android/server/hdmi/SystemAudioStatusAction.java
-@@ -92,7 +92,7 @@ final class SystemAudioStatusAction extends HdmiCecFeatureAction {
+@@ -25,7 +25,7 @@ import android.util.Slog;
+ import com.android.server.hdmi.HdmiControlService.SendMessageCallback;
  
-         if (!(tv().isSystemAudioActivated() ^ mute)) {
+ /**
+- * Action to update audio status (volume or mute) of audio amplifier
++ * Action to update audio status (volume or mute) of audio amplifier when connected.
+  */
+ final class SystemAudioStatusAction extends HdmiCecFeatureAction {
+     private static final String TAG = "SystemAudioStatusAction";
+@@ -45,8 +45,9 @@ final class SystemAudioStatusAction extends HdmiCecFeatureAction {
+ 
+     @Override
+     boolean start() {
++        HdmiLogger.debug("SystemAudioStatusAction start");
+         mState = STATE_WAIT_FOR_REPORT_AUDIO_STATUS;
+-        addTimer(mState, HdmiConfig.TIMEOUT_MS);
++        addTimer(mState, HdmiConfig.TIMEOUT_MS * 2);
+         sendGiveAudioStatus();
+         return true;
+     }
+@@ -90,10 +91,12 @@ final class SystemAudioStatusAction extends HdmiCecFeatureAction {
+         int volume = HdmiUtils.getAudioStatusVolume(cmd);
+         tv().setAudioStatus(mute, volume);
+ 
+-        if (!(tv().isSystemAudioActivated() ^ mute)) {
++        if (mute) {
              // Toggle AVR's mute status to match with the system audio status.
--            sendUserControlPressedAndReleased(mAvrAddress, HdmiCecKeycode.CEC_KEYCODE_MUTE);
-+            //sendUserControlPressedAndReleased(mAvrAddress, HdmiCecKeycode.CEC_KEYCODE_MUTE);
++            HdmiLogger.info("Send a mute key to unmute the avr when avr is connected.");
+             sendUserControlPressedAndReleased(mAvrAddress, HdmiCecKeycode.CEC_KEYCODE_MUTE);
          }
++
          finishWithCallback(HdmiControlManager.RESULT_SUCCESS);
      }
+ 
 diff --git a/services/core/java/com/android/server/hdmi/VolumeControlAction.java b/services/core/java/com/android/server/hdmi/VolumeControlAction.java
 index 2cc5e6f26bae..d39fc34ed5ce 100644
 --- a/services/core/java/com/android/server/hdmi/VolumeControlAction.java
@@ -184,5 +209,5 @@ index 2cc5e6f26bae..d39fc34ed5ce 100644
              HdmiLogger.info("VolumeControlAction timeout for report audio status");
              finish();
 -- 
-2.26.1
+2.34.1
 
