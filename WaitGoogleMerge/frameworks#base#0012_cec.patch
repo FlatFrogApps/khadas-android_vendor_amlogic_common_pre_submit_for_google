@@ -1,17 +1,17 @@
-From 573b8ee267fc8f32184db5fec89010c5471bdf50 Mon Sep 17 00:00:00 2001
+From 029f2125e533cfe5458925b31a5f6761a1b47983 Mon Sep 17 00:00:00 2001
 From: "an.xi" <an.xi@amlogic.com>
 Date: Mon, 8 Nov 2021 19:07:51 +0800
-Subject: [PATCH] cec: make sure mute key works all right for audio system
- [1/1]
+Subject: [PATCH] cec: no send mute key for audio system device [1/1]
 
 PD#SWPL-65617
 
 Problem:
-The mute key may fail to control the audio system device.
+The mute state from avr could be wrong when arc
+is just established.
 
 Solution:
-1.Update the mute status in HdmiCecLocalDeviceTv.
-2.Send a mute key if the avr is muted when arc is established.
+Init tv's volume state with unmute and don't send a
+mute key to change avr's volume.
 
 Verify:
 t982_r301
@@ -19,32 +19,27 @@ t982_r301
 Change-Id: I68db74701146529a67fb5b2c0a655210a9632b26
 Signed-off-by: an.xi <an.xi@amlogic.com>
 ---
- .../server/hdmi/HdmiCecFeatureAction.java     |  1 +
- .../server/hdmi/HdmiCecLocalDeviceTv.java     | 11 +++--
- .../server/hdmi/SystemAudioStatusAction.java  |  9 +++--
+ .../server/hdmi/HdmiCecLocalDeviceTv.java     | 12 ++++--
+ .../server/hdmi/SystemAudioStatusAction.java  | 16 +++++---
  .../server/hdmi/VolumeControlAction.java      | 40 ++++++++-----------
- 4 files changed, 31 insertions(+), 30 deletions(-)
+ 3 files changed, 34 insertions(+), 34 deletions(-)
  mode change 100755 => 100644 services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
 
-diff --git a/services/core/java/com/android/server/hdmi/HdmiCecFeatureAction.java b/services/core/java/com/android/server/hdmi/HdmiCecFeatureAction.java
-index 9c6d018583bc..98956addb4fc 100644
---- a/services/core/java/com/android/server/hdmi/HdmiCecFeatureAction.java
-+++ b/services/core/java/com/android/server/hdmi/HdmiCecFeatureAction.java
-@@ -240,6 +240,7 @@ abstract class HdmiCecFeatureAction {
-     }
- 
-     void finish(boolean removeSelf) {
-+        HdmiLogger.debug("finish " + this);
-         clear();
-         if (removeSelf) {
-             removeAction(this);
 diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
 old mode 100755
 new mode 100644
-index a780f06482d9..6e6f39e667fa
+index a780f06482d9..c1227dcb24c8
 --- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
 +++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
-@@ -1121,7 +1121,9 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+@@ -1008,7 +1008,6 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+         if (mArcEstablished == enabled) {
+             return mArcEstablished;
+         }
+-        HdmiLogger.debug("setArcStatus " + Log.getStackTraceString(new Exception()));
+         boolean oldStatus = mArcEstablished;
+         // 1. Enable/disable ARC circuit.
+         enableAudioReturnChannel(enabled);
+@@ -1121,7 +1120,9 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
      }
  
      void setAudioStatus(boolean mute, int volume) {
@@ -54,7 +49,7 @@ index a780f06482d9..6e6f39e667fa
              return;
          }
          synchronized (mLock) {
-@@ -1142,7 +1144,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+@@ -1142,7 +1143,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
          HdmiLogger.info("changeVolume curVolume=" + curVolume
                      + " delta=" + delta + " mSystemAudioVolume=" + mSystemAudioVolume);
          // Mute status should be updated with volume up and down key besides mute key.
@@ -63,7 +58,7 @@ index a780f06482d9..6e6f39e667fa
          if (getAvrDeviceInfo() == null) {
              // On initialization process, getAvrDeviceInfo() may return null and cause exception
              return;
-@@ -1190,15 +1192,18 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+@@ -1190,15 +1191,18 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
          assertRunOnServiceThread();
          if (getAvrDeviceInfo() == null || !mService.isHdmiCecVolumeControlEnabled()) {
              // On initialization process, getAvrDeviceInfo() may return null and cause exception
@@ -85,7 +80,7 @@ index a780f06482d9..6e6f39e667fa
              HdmiLogger.debug("[A]:System audio is not activated.");
              return;
 diff --git a/services/core/java/com/android/server/hdmi/SystemAudioStatusAction.java b/services/core/java/com/android/server/hdmi/SystemAudioStatusAction.java
-index 5d913d12b79f..896cb2c881db 100644
+index 5d913d12b79f..5bbed674e2e9 100644
 --- a/services/core/java/com/android/server/hdmi/SystemAudioStatusAction.java
 +++ b/services/core/java/com/android/server/hdmi/SystemAudioStatusAction.java
 @@ -25,7 +25,7 @@ import android.util.Slog;
@@ -108,15 +103,21 @@ index 5d913d12b79f..896cb2c881db 100644
          sendGiveAudioStatus();
          return true;
      }
-@@ -90,10 +91,12 @@ final class SystemAudioStatusAction extends HdmiCecFeatureAction {
+@@ -88,12 +89,15 @@ final class SystemAudioStatusAction extends HdmiCecFeatureAction {
+         byte[] params = cmd.getParams();
+         boolean mute = HdmiUtils.isAudioStatusMute(cmd);
          int volume = HdmiUtils.getAudioStatusVolume(cmd);
-         tv().setAudioStatus(mute, volume);
+-        tv().setAudioStatus(mute, volume);
++        tv().setAudioStatus(false, volume);
  
 -        if (!(tv().isSystemAudioActivated() ^ mute)) {
+-            // Toggle AVR's mute status to match with the system audio status.
+-            sendUserControlPressedAndReleased(mAvrAddress, HdmiCecKeycode.CEC_KEYCODE_MUTE);
 +        if (mute) {
-             // Toggle AVR's mute status to match with the system audio status.
-+            HdmiLogger.info("Send a mute key to unmute the avr when avr is connected.");
-             sendUserControlPressedAndReleased(mAvrAddress, HdmiCecKeycode.CEC_KEYCODE_MUTE);
++            // Don't toggle AVR's mute status to match with the system audio status.
++            // The avr may not be mute and send a wrong mesage.
++            HdmiLogger.info("No send a mute key to unmute the avr when avr is connected.");
++            //sendUserControlPressedAndReleased(mAvrAddress, HdmiCecKeycode.CEC_KEYCODE_MUTE);
          }
 +
          finishWithCallback(HdmiControlManager.RESULT_SUCCESS);
@@ -209,5 +210,5 @@ index 2cc5e6f26bae..d39fc34ed5ce 100644
              HdmiLogger.info("VolumeControlAction timeout for report audio status");
              finish();
 -- 
-2.34.1
+2.25.1
 
