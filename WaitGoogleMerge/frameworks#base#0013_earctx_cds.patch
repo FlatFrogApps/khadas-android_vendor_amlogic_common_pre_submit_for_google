@@ -1,0 +1,93 @@
+From 59d46d9538c5566fe89a72ff455fd3945fed092a Mon Sep 17 00:00:00 2001
+From: jian zhou <jian.zhou@amlogic.com>
+Date: Fri, 10 Dec 2021 19:19:10 +0800
+Subject: [PATCH] Audio: set earctx cds info to edid [1/1]
+
+PD#SWPL-66903
+
+Problem:
+connect earc AVR, the edid is not same with
+earc cds
+
+Solution:
+set earctx cds info to edid
+
+Verify:
+t3-ar301
+
+Signed-off-by: jian zhou <jian.zhou@amlogic.com>
+Change-Id: I09affdab32f6107e5031213b27f915c947c09f15
+---
+ .../RequestShortAudioDescriptorAction.java    | 34 ++++++++++++++++---
+ 1 file changed, 29 insertions(+), 5 deletions(-)
+
+diff --git a/services/core/java/com/android/server/hdmi/RequestShortAudioDescriptorAction.java b/services/core/java/com/android/server/hdmi/RequestShortAudioDescriptorAction.java
+index 8465290337c2..8b2b72806e39 100644
+--- a/services/core/java/com/android/server/hdmi/RequestShortAudioDescriptorAction.java
++++ b/services/core/java/com/android/server/hdmi/RequestShortAudioDescriptorAction.java
+@@ -24,6 +24,7 @@ import android.provider.Settings;
+ 
+ import java.util.Arrays;
+ 
++
+ /**
+  * This action is to send 'Request Short Audio Descriptor' HDMI-CEC command to AVR when connects.
+  * And call setParameters to Audio HAL to update audio format support list.
+@@ -82,7 +83,7 @@ final class RequestShortAudioDescriptorAction extends HdmiCecFeatureAction {
+ 
+     private final int SAD_REQ_TIMEOUT_MS = 10000;
+ 
+-    private final int[] SUPPORT_CODECS = {SAD_CODEC_AC3, SAD_CODEC_DTS, SAD_CODEC_DDP, SAD_CODEC_DTSHD};
++    private final int[] SUPPORT_CODECS = {SAD_CODEC_AC3, SAD_CODEC_DTS, SAD_CODEC_DDP, SAD_CODEC_DTSHD, SAD_CODEC_MAT};
+ 
+     private final byte SUPPORT = 1;
+     private final byte UNSUPPORT = 0;
+@@ -145,11 +146,25 @@ final class RequestShortAudioDescriptorAction extends HdmiCecFeatureAction {
+             case Constants.MESSAGE_REPORT_SHORT_AUDIO_DESCRIPTOR:
+                 // If avr returns REPORT_SHORT_AUDIO_DESCRIPTOR, it should have at least one short
+                 // audio descriptor. If it returns invalid value, TV should ignore the message.
+-                if (params.length == 0) {
+-                    mDescriptor = null;
++                if (tv().isEarcOn()) {
++                    String s1 = getParameters("hal_param_get_earctx_cds");
++                    String s2 = s1.replaceAll("hal_param_get_earctx_cds=", "");
++                    String[] s3 = s2.split(", ");
++                    int i = 0;
++                    HdmiLogger.info("cds:" + s2 + ":" + s3.length);
++                    mDescriptor = new byte[s3.length];
++
++                    for (String retval: s3){
++                        mDescriptor[i] = (byte) (Integer.parseInt(retval));
++                        i++;
++                    }
+                 } else {
+-                    mDescriptor = new byte[params.length];
+-                    System.arraycopy(params, 0, mDescriptor, 0, params.length);
++                    if (params.length == 0) {
++                        mDescriptor = null;
++                    } else {
++                        mDescriptor = new byte[params.length];
++                        System.arraycopy(params, 0, mDescriptor, 0, params.length);
++                    }
+                 }
+                 setAudioFormat();
+                 return true;
+@@ -246,6 +261,15 @@ final class RequestShortAudioDescriptorAction extends HdmiCecFeatureAction {
+         }
+     }
+ 
++    /**
++     * get k-v parameters to audio HAL
++     */
++    private String getParameters(String parameters) {
++        if (mService != null)
++            return mService.getAudioManager().getParameters(parameters);
++        return null;
++    }
++
+     private void sendRequestShortAudioDescriptor() {
+         int formatLength = Math.min(SUPPORT_CODECS.length, MAX_SAD_NUM);
+         byte[] formats = new byte[formatLength]; //Audio Format ID & Code, max length is 4
+-- 
+2.34.1
+
