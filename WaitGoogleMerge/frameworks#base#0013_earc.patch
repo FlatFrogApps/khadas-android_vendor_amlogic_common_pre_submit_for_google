@@ -1,0 +1,93 @@
+From 9837d00fd8ffa6df89cee40ddb48401e933ddb62 Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Tue, 14 Dec 2021 20:40:08 +0800
+Subject: [PATCH] cec: init earc when the system is boot completed [1/1]
+
+PD#SWPL-65871
+
+Problem:
+There could be a noise if earc is initiated too early.
+
+Solution:
+init earc when the system is boot completed.
+
+Verify:
+t982_ar301
+
+Change-Id: I93f9e02e2962f01d1a97e13c7206f18c9fc0d007
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../android/server/hdmi/HdmiCecLocalDeviceTv.java   |  3 +++
+ .../com/android/server/hdmi/HdmiControlService.java | 13 ++++++++++++-
+ 2 files changed, 15 insertions(+), 1 deletion(-)
+ mode change 100755 => 100644 services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+old mode 100755
+new mode 100644
+index c1227dcb24c8..a3e4ef21c4e7
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+@@ -896,7 +896,10 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+     void changeSystemAudioMode(boolean enabled, IHdmiControlCallback callback) {
+         assertRunOnServiceThread();
+         if (!mService.isControlEnabled()) {
++            HdmiLogger.debug("changeSystemAudioMode false while cec is disabled!");
+             setSystemAudioMode(false);
++            mService.sendCecCommand(HdmiCecMessageBuilder.buildSystemAudioModeRequest(
++                mAddress, Constants.ADDR_AUDIO_SYSTEM, 0, false));
+             invokeCallback(callback, HdmiControlManager.RESULT_INCORRECT_MODE);
+             return;
+         }
+diff --git a/services/core/java/com/android/server/hdmi/HdmiControlService.java b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+index f472280b3809..dae5ef3afd51 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiControlService.java
++++ b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+@@ -360,6 +360,8 @@ public class HdmiControlService extends SystemService {
+ 
+     private HdmiCecMessageValidator mMessageValidator;
+ 
++    private boolean mBootComplete;
++
+     @ServiceThreadOnly
+     private int mPowerStatus = HdmiControlManager.POWER_STATUS_UNKNOWN;
+ 
+@@ -570,10 +572,13 @@ public class HdmiControlService extends SystemService {
+     }
+ 
+     private void bootCompleted() {
++        HdmiLogger.info("bootCompleted");
+         // on boot, if device is interactive, set HDMI CEC state as powered on as well
+         if (mPowerManager.isInteractive() && isPowerStandbyOrTransient()) {
+             onWakeUp();
+         }
++        mBootComplete = true;
++        onEarcStateChanged(isEarcOn());
+     }
+ 
+     /**
+@@ -815,6 +820,10 @@ public class HdmiControlService extends SystemService {
+     }
+ 
+     public void onEarcStateChanged(final boolean isEarcOn) {
++        if (!mBootComplete) {
++            HdmiLogger.info("onEarcStateChanged abort for not boot completed " + isEarcOn);
++            return;
++        }
+         runOnServiceThread(()->{
+             if (tv() != null) {
+                 tv().onEarcStateChanged(isEarcOn);
+@@ -934,7 +943,9 @@ public class HdmiControlService extends SystemService {
+                     }
+ 
+                     // Init earc state.
+-                    localDevice.onEarcStateChanged(isEarcOn());
++                    if (mBootComplete) {
++                        localDevice.onEarcStateChanged(isEarcOn());
++                    }
+ 
+                     // Address allocation completed for all devices. Notify each device.
+                     if (allocatingDevices.size() == ++finished[0]) {
+-- 
+2.25.1
+
