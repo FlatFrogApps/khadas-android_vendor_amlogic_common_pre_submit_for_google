@@ -1,0 +1,52 @@
+From 50ba93cd56ee58e8c1923a2ffb343b8d327527aa Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Thu, 23 Dec 2021 15:24:03 +0800
+Subject: [PATCH] cec: add earc condition for arc switch [1/1]
+
+PD#SWPL-65056
+
+Problem:
+New demand for arc switch. Earc state is prior
+to the arc switch.
+
+Solution:
+1.If earc is on, then only change the state
+and do nothing.
+2.The arc logic swtich should be on if earc is on.
+
+Verify:
+tv
+
+Change-Id: Iafde2c101221765be88e5892f2337aebc43d9523
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java  | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+index a3e4ef21c4e7..cc7ded474d3f 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+@@ -977,6 +977,10 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+         synchronized (mLock) {
+             mSystemAudioControlFeatureEnabled = enabled;
+         }
++        if (isEarcOn()) {
++            HdmiLogger.debug("setSystemAudioControlFeatureEnabled abort for earc on");
++            return;
++        }
+         if (hasSystemAudioDevice()) {
+             changeSystemAudioMode(enabled, null);
+         }
+@@ -987,7 +991,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+ 
+     boolean isSystemAudioControlFeatureEnabled() {
+         synchronized (mLock) {
+-            return mSystemAudioControlFeatureEnabled;
++            return isEarcOn() || mSystemAudioControlFeatureEnabled;
+         }
+     }
+ 
+-- 
+2.25.1
+
