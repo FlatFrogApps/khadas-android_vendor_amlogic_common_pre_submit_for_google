@@ -1,0 +1,42 @@
+From a9a94458701345420346bc4d473a03af083fb0d2 Mon Sep 17 00:00:00 2001
+From: "qiujuan.liang" <qiujuan.liang@amlogic.com>
+Date: Sat, 25 Dec 2021 19:52:23 +0800
+Subject: [PATCH] =?UTF-8?q?Music=EF=BC=9A=20file=20browser=20can't=20play?=
+ =?UTF-8?q?=20.APE=20music=20file=20[1/1]?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+PD#SWPL-64449
+
+Problem:
+file browser can't play .APE music file
+
+Solution:
+add write storage permission
+
+Verify:
+T982
+
+Signed-off-by: qiujuan.liang <qiujuan.liang@amlogic.com>
+Change-Id: I5b79b6585f48d3f373ac2ccd5eb58874560e44a7
+---
+ AndroidManifest.xml | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+index 02414ba..0837cdf 100644
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -28,6 +28,8 @@
+ 
+     <!-- Permissions -->
+     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
++    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
++    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+ 
+     <!-- App Declaration -->
+     <application
+-- 
+2.25.1
+
