@@ -1,4 +1,4 @@
-From 50ba93cd56ee58e8c1923a2ffb343b8d327527aa Mon Sep 17 00:00:00 2001
+From 1cfbdbef816ab86333fccb74ff217bc7031e8915 Mon Sep 17 00:00:00 2001
 From: "an.xi" <an.xi@amlogic.com>
 Date: Thu, 23 Dec 2021 15:24:03 +0800
 Subject: [PATCH] cec: add earc condition for arc switch [1/1]
@@ -20,14 +20,41 @@ tv
 Change-Id: Iafde2c101221765be88e5892f2337aebc43d9523
 Signed-off-by: an.xi <an.xi@amlogic.com>
 ---
- .../java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java  | 6 +++++-
- 1 file changed, 5 insertions(+), 1 deletion(-)
+ .../server/hdmi/HdmiCecLocalDeviceTv.java     | 29 ++++++++++++-------
+ .../server/hdmi/HdmiControlService.java       |  4 ---
+ .../hdmi/RequestArcTerminationAction.java     |  5 +++-
+ 3 files changed, 23 insertions(+), 15 deletions(-)
 
 diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
-index a3e4ef21c4e7..cc7ded474d3f 100644
+index 69840b643d0b..0b0995a82838 100644
 --- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
 +++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
-@@ -977,6 +977,10 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+@@ -242,10 +242,20 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+ 
+     public void onEarcSettingChanged(boolean on) {
+         HdmiLogger.debug("TV onEarcSettingChanged when arc is " + mArcEstablished);
+-        if (on && mArcEstablished) {
+-            addAndStartAction(new RequestArcTerminationAction(this, Constants.ADDR_AUDIO_SYSTEM, on));
+-        } else if (!on && !mArcEstablished) {
+-            startArcAction(true);
++        mEarcOn = on;
++        if (on) {
++            if (mArcEstablished) {
++                // Earc should be turned on after the arc is terminated.
++                addAndStartAction(new RequestArcTerminationAction(this, Constants.ADDR_AUDIO_SYSTEM, on));
++            } else {
++                mService.setEarcMode(true);
++            }
++        } else if (!on) {
++            // Earc should be directly turned off.
++            mService.setEarcMode(false);
++            if (!mArcEstablished) {
++                startArcAction(true);
++            }
+         }
+     }
+ 
+@@ -991,6 +1001,10 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
          synchronized (mLock) {
              mSystemAudioControlFeatureEnabled = enabled;
          }
@@ -38,7 +65,7 @@ index a3e4ef21c4e7..cc7ded474d3f 100644
          if (hasSystemAudioDevice()) {
              changeSystemAudioMode(enabled, null);
          }
-@@ -987,7 +991,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+@@ -1001,7 +1015,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
  
      boolean isSystemAudioControlFeatureEnabled() {
          synchronized (mLock) {
@@ -47,6 +74,63 @@ index a3e4ef21c4e7..cc7ded474d3f 100644
          }
      }
  
+@@ -1017,11 +1031,6 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+         HdmiLogger.info("Set Arc Status[old:%b new:%b], and audio mode:%b",
+             mArcEstablished, enabled, mService.isSystemAudioActivated());
+ 
+-        if (isEarcOn()) {
+-            HdmiLogger.info("No need to setArcStatus for earc on");
+-            return false;
+-        }
+-
+         if (mArcEstablished == enabled) {
+             return mArcEstablished;
+         }
+diff --git a/services/core/java/com/android/server/hdmi/HdmiControlService.java b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+index 046bbb173970..145640a292b3 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiControlService.java
++++ b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+@@ -852,10 +852,6 @@ public class HdmiControlService extends SystemService {
+     }
+ 
+     public void onEarcSettingChanged(boolean on) {
+-        if (!on) {
+-            // directly turn off earc.
+-            setEarcMode(false);
+-        }
+         if (tv() != null) {
+             tv().onEarcSettingChanged(on);
+         } else if (audioSystem() != null) {
+diff --git a/services/core/java/com/android/server/hdmi/RequestArcTerminationAction.java b/services/core/java/com/android/server/hdmi/RequestArcTerminationAction.java
+index f362a4126892..384235c22f66 100644
+--- a/services/core/java/com/android/server/hdmi/RequestArcTerminationAction.java
++++ b/services/core/java/com/android/server/hdmi/RequestArcTerminationAction.java
+@@ -87,6 +87,7 @@ final class RequestArcTerminationAction extends RequestArcAction {
+                     HdmiLogger.info("Terminate arc and then start earc.");
+                     tv().handleTerminateArc(cmd);
+                     tv().mService.setEarcMode(true);
++                    finish();
+                     return true;
+                 }
+                 break;
+@@ -94,7 +95,6 @@ final class RequestArcTerminationAction extends RequestArcAction {
+         return false;
+     }
+ 
+-
+     @Override
+     final void handleTimerEvent(int state) {
+         if (mState != state || state != STATE_WATING_FOR_REQUEST_ARC_REQUEST_RESPONSE) {
+@@ -102,6 +102,9 @@ final class RequestArcTerminationAction extends RequestArcAction {
+         }
+         HdmiLogger.error("[T] RequestArcTerminationAction.");
+         disableArcTransmission();
++        if (mEarc) {
++            tv().mService.setEarcMode(true);
++        }
+         finish();
+     }
+ }
 -- 
 2.25.1
 
