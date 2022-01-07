@@ -1,0 +1,105 @@
+From d3c2416a52ff99d9297ff17992a0e73e448384f9 Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Thu, 6 Jan 2022 17:24:22 +0800
+Subject: [PATCH] cec: remove the avr port condition of establishing arc [1/1]
+
+PD#SWPL-69035
+
+Problem:
+The hdmi test arc's port is HDMI1 while the trunk's is HDMI2.
+
+Solution:
+Reject establishing arc does not change the result. Then just
+remove the condition.
+
+Verify:
+t982_ar301
+
+Change-Id: I901142c90fea5cce1f1fe74ee03ee112e7d292f3
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../server/hdmi/HdmiCecLocalDeviceTv.java     | 25 +++++++++++++------
+ 1 file changed, 18 insertions(+), 7 deletions(-)
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+index 4887b704a70e..023fc2a5838d 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+@@ -883,6 +883,8 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+     void onNewAvrAdded(HdmiDeviceInfo avr) {
+         assertRunOnServiceThread();
+         HdmiLogger.debug("onNewAvrAdded " + avr);
++        mService.sendCecCommand(HdmiCecMessageBuilder.buildGiveSystemAudioModeStatus(
++            mAddress, avr.getLogicalAddress()));
+         addAndStartAction(new SystemAudioActionFromTv(this, avr.getLogicalAddress(),
+                 isSystemAudioControlFeatureEnabled(), null));
+         if (isEarcOn()) {
+@@ -957,10 +959,13 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+     }
+ 
+     boolean isConnectedToArcDevice(HdmiDeviceInfo avr) {
+-        if (avr == null
+-            || avr.getPortId() != mService.getArcPortId()) {
++        if (avr == null) {
+             return false;
+         }
++        if (avr.getPortId() != mService.getArcPortId()) {
++            // For HDMI CEC TESTR REASON, the arc port in tester is solid 0x1.
++            HdmiLogger.warning("Avr is connected to arc port!");
++        }
+         return true;
+     }
+ 
+@@ -973,8 +978,13 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+     void updateAudioFormat(boolean on) {
+         HdmiLogger.debug("updateAudioFormat " + on);
+         removeAction(RequestShortAudioDescriptorAction.class);
++        HdmiDeviceInfo avr = getAvrDeviceInfo();
++        int arcPort = mService.getArcPortId();
++        if (avr != null) {
++            arcPort = avr.getPortId();
++        }
+         addAndStartAction(new RequestShortAudioDescriptorAction(
+-            this, Constants.ADDR_AUDIO_SYSTEM, on, mService, mService.getArcPortId()));
++            this, Constants.ADDR_AUDIO_SYSTEM, on, mService, arcPort));
+     }
+ 
+     private void updateAudioManagerForSystemAudio(boolean on) {
+@@ -1094,7 +1104,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+     @ServiceThreadOnly
+     boolean isArcFeatureEnabled(int portId) {
+         assertRunOnServiceThread();
+-        return mArcFeatureEnabled.get(portId);
++        return true;//mArcFeatureEnabled.get(portId);
+     }
+ 
+     @ServiceThreadOnly
+@@ -1274,13 +1284,13 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+                 && isConnectedToArcPort(avr.getPhysicalAddress())
+                 && isDirectConnectAddress(avr.getPhysicalAddress())) {
+             if (enabled) {
++                // For HDMI CEC TESTR REASON, the arc port in tester is solid 0x1.
+                 return isArcFeatureEnabled(avr.getPortId());
+             } else {
+                 return true;
+             }
+-        } else {
+-            return false;
+         }
++        return true;
+     }
+ 
+     @Override
+@@ -1352,7 +1362,8 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+             mService.maySendFeatureAbortCommand(message, Constants.ABORT_REFUSED);
+             return true;
+         }
+-        setSystemAudioMode(HdmiUtils.parseCommandParamSystemAudioStatus(message));
++        // Don't change audio mode status in here.
++        //setSystemAudioMode(HdmiUtils.parseCommandParamSystemAudioStatus(message));
+         return true;
+     }
+ 
+-- 
+2.25.1
+
