@@ -1,0 +1,60 @@
+From d39693ba36daa6c923c4f0d22dab9a6db209f4eb Mon Sep 17 00:00:00 2001
+From: jian zhou <jian.zhou@amlogic.com>
+Date: Mon, 10 Jan 2022 20:05:42 +0800
+Subject: [PATCH] Audio: fix parseInt crash [1/1]
+
+PD#SWPL-69652
+
+Problem:
+{Audio}[T3][R][DDP][Block]Use HDFury setting the CDS of PCM not valid,
+platform enters the boot animation page
+Root Cause:when earc only support pcm, the audio format string is:"",
+and will crash for parseInt
+
+Solution:
+add try catch
+
+Verify:
+t3-ar301
+
+Signed-off-by: jian zhou <jian.zhou@amlogic.com>
+Change-Id: I24a89744173546f11cd98d31162439e62561f39b
+---
+ .../RequestShortAudioDescriptorAction.java    | 20 ++++++++++++++++---
+ 1 file changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/services/core/java/com/android/server/hdmi/RequestShortAudioDescriptorAction.java b/services/core/java/com/android/server/hdmi/RequestShortAudioDescriptorAction.java
+index 8b2b72806e39..3a88b1b5903a 100644
+--- a/services/core/java/com/android/server/hdmi/RequestShortAudioDescriptorAction.java
++++ b/services/core/java/com/android/server/hdmi/RequestShortAudioDescriptorAction.java
+@@ -152,10 +152,24 @@ final class RequestShortAudioDescriptorAction extends HdmiCecFeatureAction {
+                     String[] s3 = s2.split(", ");
+                     int i = 0;
+                     HdmiLogger.info("cds:" + s2 + ":" + s3.length);
+-                    mDescriptor = new byte[s3.length];
++                    if (s3.length == 1) {
++                        /*
++                         * there is no raw data info from eARC AVR
++                         * so only send 0
++                         */
++                        mDescriptor = new byte[]{0, 0, 0};
++                    } else {
++                        mDescriptor = new byte[s3.length];
++                    }
+ 
+-                    for (String retval: s3){
+-                        mDescriptor[i] = (byte) (Integer.parseInt(retval));
++                    for (String retval: s3) {
++                        int val = 0;
++                        try {
++                            val = Integer.parseInt(retval);
++                        } catch(Exception e) {
++                            HdmiLogger.error("parse sad error:" + e);
++                        }
++                        mDescriptor[i] = (byte) val;
+                         i++;
+                     }
+                 } else {
+-- 
+2.34.1
+
