@@ -1,0 +1,42 @@
+From 21a2fc5ef39b7ff14b3fc37a23869318a6013e11 Mon Sep 17 00:00:00 2001
+From: "junlan.duan" <junlan.duan@amlogic.com>
+Date: Thu, 13 Jan 2022 11:26:23 +0800
+Subject: [PATCH] framework: add 64bit support
+
+PD#SH-8930
+add 64bit support
+
+Change-Id: I180bc31263cd74d0dbb4b9d023c728dfc5e7f352
+---
+ cmds/bootanimation/Android.bp                      | 1 +
+ services/java/com/android/server/SystemServer.java | 2 +-
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/cmds/bootanimation/Android.bp b/cmds/bootanimation/Android.bp
+index c3093a9b6530..b58932d8d7a6 100644
+--- a/cmds/bootanimation/Android.bp
++++ b/cmds/bootanimation/Android.bp
+@@ -9,6 +9,7 @@ cc_defaults {
+         "-Werror",
+         "-Wunused",
+         "-Wunreachable-code",
++        "-Wno-format",
+     ],
+
+     shared_libs: [
+diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
+index 3a10b23c87a7..924d1c8f53d8 100644
+--- a/services/java/com/android/server/SystemServer.java
++++ b/services/java/com/android/server/SystemServer.java
+@@ -1905,7 +1905,7 @@ public final class SystemServer {
+             if (mPackageManager.hasSystemFeature(PackageManager.FEATURE_LIVE_TV)
+                     || mPackageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)) {
+                 t.traceBegin("StartTvInputManager");
+-                mSystemServiceManager.startService(TvInputManagerService.class);
++                //mSystemServiceManager.startService(TvInputManagerService.class);
+                 t.traceEnd();
+             }
+
+--
+2.25.1
+
