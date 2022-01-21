@@ -1,0 +1,40 @@
+From d259d65e0695ec89f206ee39d12b225cc592d1cd Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Fri, 21 Jan 2022 11:10:34 +0800
+Subject: [PATCH] cec: start arc action when earc is off [1/1]
+
+PD#SWPL-70131
+
+Problem:
+When earc is off, arc should be established if possible.
+
+Solution:
+start arc action when earc is off.
+
+Verify:
+t3
+
+Change-Id: I31799de36db3a542145f307c07bc6ce29c553f87
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java    | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+index 023fc2a5838d..1d178564e7e1 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+@@ -1111,10 +1111,6 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+     void startArcAction(boolean enabled) {
+         assertRunOnServiceThread();
+         HdmiLogger.info("startArcAction [old:%b new:%b]", mArcEstablished, enabled);
+-        if (mArcEstablished == enabled) {
+-            HdmiLogger.debug("startArcAction arc already established:" + mArcEstablished);
+-            return;
+-        }
+ 
+         HdmiDeviceInfo info = getAvrDeviceInfo();
+         if (!isConnectedToArcDevice(info)) {
+-- 
+2.25.1
+
