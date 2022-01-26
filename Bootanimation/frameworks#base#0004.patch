@@ -1,16 +1,25 @@
-From 21a2fc5ef39b7ff14b3fc37a23869318a6013e11 Mon Sep 17 00:00:00 2001
-From: "junlan.duan" <junlan.duan@amlogic.com>
-Date: Thu, 13 Jan 2022 11:26:23 +0800
-Subject: [PATCH] framework: add 64bit support
+From 6d8547b76c94622417613d97d9e3ba18ea012058 Mon Sep 17 00:00:00 2001
+From: Zhuying Li <zhuying.li@amlogic.com>
+Date: Wed, 26 Jan 2022 16:22:30 +0800
+Subject: [PATCH] Bootanimation: T7 64 bit project bring up [1/1]
 
-PD#SH-8930
-add 64bit support
+PD#SWPL-70914
 
-Change-Id: I180bc31263cd74d0dbb4b9d023c728dfc5e7f352
+Problem:
+TvInputManagerService can't start due to lost media hal 64 bit so.
+
+Solution:
+Start service TvInputManagerService when tv is booting up.
+media hal has provided 64 bit so.
+
+Verify:
+Verfiy on t7_an400
+
+Signed-off-by: Zhuying <zhuying.li@amlogic.com>
+Change-Id: Id70f2b47198c29b0027844caca17aebe57458631
 ---
- cmds/bootanimation/Android.bp                      | 1 +
- services/java/com/android/server/SystemServer.java | 2 +-
- 2 files changed, 2 insertions(+), 1 deletion(-)
+ cmds/bootanimation/Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
 
 diff --git a/cmds/bootanimation/Android.bp b/cmds/bootanimation/Android.bp
 index c3093a9b6530..b58932d8d7a6 100644
@@ -22,21 +31,8 @@ index c3093a9b6530..b58932d8d7a6 100644
          "-Wunreachable-code",
 +        "-Wno-format",
      ],
-
+ 
      shared_libs: [
-diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
-index 3a10b23c87a7..924d1c8f53d8 100644
---- a/services/java/com/android/server/SystemServer.java
-+++ b/services/java/com/android/server/SystemServer.java
-@@ -1905,7 +1905,7 @@ public final class SystemServer {
-             if (mPackageManager.hasSystemFeature(PackageManager.FEATURE_LIVE_TV)
-                     || mPackageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)) {
-                 t.traceBegin("StartTvInputManager");
--                mSystemServiceManager.startService(TvInputManagerService.class);
-+                //mSystemServiceManager.startService(TvInputManagerService.class);
-                 t.traceEnd();
-             }
-
---
+-- 
 2.25.1
 
