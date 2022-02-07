@@ -1,0 +1,75 @@
+From cf0ddbfe52abdb5b588cb23562a2659e860f70c9 Mon Sep 17 00:00:00 2001
+From: Zhe Wang <Zhe.Wang@amlogic.com>
+Date: Mon, 7 Feb 2022 13:37:34 +0800
+Subject: [PATCH] audio: bringup headphone on AM301 [4/4]
+
+PD#SWPL-56272
+
+Problem:
+bringup headphone on AM301
+
+Solution:
+For headphone device, "set_audio_port_config"
+as volume setting
+
+Verify:
+verify by redi.
+
+Signed-off-by: Zhe Wang <Zhe.Wang@amlogic.com>
+Change-Id: I5957150f1ed12a32d1b4010267f7562a72306380
+---
+ .../audiopolicy/managerdefault/AudioPolicyManager.cpp  | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 13b7dd4c9a..682a47dba8 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -1984,7 +1984,7 @@ status_t AudioPolicyManager::getInputForAttr(const audio_attributes_t *attr,
+     }
+ 
+     // Explicit routing?
+-    sp<DeviceDescriptor> explicitRoutingDevice = 
++    sp<DeviceDescriptor> explicitRoutingDevice =
+             mAvailableInputDevices.getDeviceFromId(*selectedDeviceId);
+ 
+     // special case for mmap capture: if an input IO handle is specified, we reuse this input if
+@@ -2166,7 +2166,7 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
+             profileFlags = AUDIO_INPUT_FLAG_NONE; // retry
+         } else { // fail
+             ALOGW("%s could not find profile for device %s, sampling rate %u, format %#x, "
+-                  "channel mask 0x%X, flags %#x", __func__, device->toString().c_str(), 
++                  "channel mask 0x%X, flags %#x", __func__, device->toString().c_str(),
+                   config->sample_rate, config->format, config->channel_mask, flags);
+             return input;
+         }
+@@ -5048,7 +5048,7 @@ status_t AudioPolicyManager::checkInputsForDevice(const sp<DeviceDescriptor>& de
+             } // endif input != 0
+ 
+             if (input == AUDIO_IO_HANDLE_NONE) {
+-                ALOGW("%s could not open input for device %s", __func__,  
++                ALOGW("%s could not open input for device %s", __func__,
+                        device->toString().c_str());
+                 profiles.removeAt(profile_index);
+                 profile_index--;
+@@ -6162,7 +6162,7 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
+         bool            speakerGainApplied = false;
+         bool            bootVideoRunning = property_get_int32("service.bootvideo.exit", 0) == 1;
+ 
+-        if (curDevice == AUDIO_DEVICE_OUT_SPEAKER &&
++        if ((curDevice == AUDIO_DEVICE_OUT_SPEAKER || curDevice == AUDIO_DEVICE_OUT_WIRED_HEADPHONE) &&
+             (outputDesc->isStrategyActive(streamToStrategy(AUDIO_STREAM_MUSIC)) || bootVideoRunning)) {
+             //ignoring the "index" passed as argument and always use MUSIC stream index
+             //for all stream types works on TV because all stream types are aliases of MUSIC.
+@@ -6188,7 +6188,7 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
+             speakerGainApplied = outputDesc->updateGain(curDevice,
+                                         musicVolumeDb, minMusicVolumeDb, maxMusicVolumeDb);
+         }
+-        if (curDevice == AUDIO_DEVICE_OUT_HDMI_ARC || curDevice == AUDIO_DEVICE_OUT_WIRED_HEADPHONE ||
++        if (curDevice == AUDIO_DEVICE_OUT_HDMI_ARC ||
+             (speakerGainApplied && (curDevice & AUDIO_DEVICE_OUT_SPEAKER) != 0)) {
+             volumeDb = 0.0f;
+         }
+-- 
+2.28.0
+
