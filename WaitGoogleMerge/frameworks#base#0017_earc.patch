@@ -1,0 +1,73 @@
+From 1a8704f17fb0864f05cb432fab233cb561d11d87 Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Tue, 8 Feb 2022 11:19:38 +0800
+Subject: [PATCH] cec: remove earc condition for arc,earc settings switch [1/1]
+
+PD#SWPL-71623
+
+Problem:
+The arc,earc settings controls both arc and earc switch.
+
+Solution:
+1.remove earc condition for arc,earc settings switch.
+2.no terminate arc when earc is established for it can't happen.
+
+Verify:
+t982_ar301
+
+Change-Id: Id8b53a85dcdb98ec5c002da492809e3417f7e390
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../android/server/hdmi/HdmiCecLocalDeviceTv.java | 15 ++++++---------
+ 1 file changed, 6 insertions(+), 9 deletions(-)
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+index 1d178564e7e1..d6baaa27dfc0 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+@@ -232,9 +232,10 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+         // 1.Update earc status.
+         updateEarcState(earcOn);
+         // 2.Update the arc status.
+-        if (mService.isSystemAudioActivated()) {
+-            // Give a shot for arc action when earc is off.
+-            HdmiLogger.debug("Going to start arc action when earc is changed");
++        if (mService.isSystemAudioActivated() && !earcOn) {
++            // Give a shot for arc action when earc is off. There is no case
++            // where arc switches to earc.
++            HdmiLogger.debug("Going to start arc action when earc is off");
+             startArcAction(!earcOn);
+         }
+ 
+@@ -1005,10 +1006,6 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+         synchronized (mLock) {
+             mSystemAudioControlFeatureEnabled = enabled;
+         }
+-        if (isEarcOn()) {
+-            HdmiLogger.debug("setSystemAudioControlFeatureEnabled abort for earc on");
+-            return;
+-        }
+         if (hasSystemAudioDevice()) {
+             changeSystemAudioMode(enabled, null);
+         }
+@@ -1019,7 +1016,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+ 
+     boolean isSystemAudioControlFeatureEnabled() {
+         synchronized (mLock) {
+-            return isEarcOn() || mSystemAudioControlFeatureEnabled;
++            return mSystemAudioControlFeatureEnabled;
+         }
+     }
+ 
+@@ -1173,7 +1170,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+             // On initialization process, getAvrDeviceInfo() may return null and cause exception
+             return;
+         }
+-        if (delta == 0 || (!isSystemAudioActivated() && !isEarcOn()) || !mService.isHdmiCecVolumeControlEnabled()) {
++        if (delta == 0 || (!isSystemAudioActivated()) || !mService.isHdmiCecVolumeControlEnabled()) {
+             return;
+         }
+ 
+-- 
+2.25.1
+
