@@ -1,0 +1,50 @@
+From 697255bc124253fb80e0d125abab3f90d95fd68f Mon Sep 17 00:00:00 2001
+From: "hao.qi" <hao.qi@amlogic.com>
+Date: Wed, 9 Feb 2022 18:59:46 +0800
+Subject: [PATCH] kernel_build: kernel build taking way too long [1/1]
+
+PD#SWPL-71718
+
+Problem:
+kernel build taking way too long
+
+Solution:
+Assign the repo_branch value directly
+
+Verify:
+t7
+
+Change-Id: If49de217a064c771797f92a2b2691231ea25d8b6
+Signed-off-by: hao.qi <hao.qi@amlogic.com>
+---
+ _setup_env.sh | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/_setup_env.sh b/_setup_env.sh
+index 6b941b9..78f246e 100644
+--- a/_setup_env.sh
++++ b/_setup_env.sh
+@@ -32,12 +32,14 @@ export COMMON_OUT_DIR=$(readlink -m ${OUT_DIR:-${ROOT_DIR}/out${OUT_DIR_SUFFIX}/
+ export OUT_DIR=$(readlink -m ${COMMON_OUT_DIR}/${KERNEL_DIR})
+ export DIST_DIR=$(readlink -m ${DIST_DIR:-${COMMON_OUT_DIR}/dist})
+ 
+-if sh -c 'which repo && repo info' >/dev/null 2>&1; then
+-  # extract the repo branch name (e.g. common-android-mainline)
+-  repo_branch=$(repo --color=never info -o | grep -E "Manifest merge branch" |
+-                                             sed "s|.*refs/heads/\(.*\)|\1|")
+-  export KBUILD_BUILD_VERSION="1 repo:$repo_branch"
+-fi
++#if sh -c 'which repo && repo info' >/dev/null 2>&1; then
++#  # extract the repo branch name (e.g. common-android-mainline)
++#  repo_branch=$(repo --color=never info -o | grep -E "Manifest merge branch" |
++#                                             sed "s|.*refs/heads/\(.*\)|\1|")
++#  export KBUILD_BUILD_VERSION="1 repo:$repo_branch"
++#fi
++repo_branch=r-amlogic
++export KBUILD_BUILD_VERSION="1 repo:$repo_branch"
+ 
+ echo "========================================================"
+ echo "= build config: ${ROOT_DIR}/${BUILD_CONFIG}"
+-- 
+2.25.1
+
