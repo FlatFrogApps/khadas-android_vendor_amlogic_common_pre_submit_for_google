@@ -1,0 +1,81 @@
+From c4596437c7c6073496056f7a28aa53bda3f434c8 Mon Sep 17 00:00:00 2001
+From: "hongchao.yin" <hongchao.yin@amlogic.com>
+Date: Thu, 3 Mar 2022 11:19:41 +0800
+Subject: [PATCH] TvAudio: headphone have a higher priority than ARC [3/3]
+
+PD#SWPL-71657
+
+Problem:
+SWPL-62393 SWPL-71657
+{T5D}{Android R}{Headphone}Connect to ARC/BT speaker,
+then insert headphone, system react abnormally. (5/5, no contrast)
+
+Solution:
+1. TalkBack stream is ACCESSIBILITY(STRATEGY_ACCESSIBILITY),
+not STRATEGY_MEDIA
+2. we will only set the gain to audio_hal when STRATEGY_MEDIA policy
+stream is playing.
+3. set the gain to audio_hal in any scenario
+4. headphone have a higher priority than ARC
+
+Verify:
+verified by R + redi
+
+Change-Id: I210be9d74bd3e99ca4e735ebdb1a0ebc16c6c138
+Signed-off-by: hongchao.yin <hongchao.yin@amlogic.com>
+---
+ services/audiopolicy/common/include/policy.h         |  4 +++-
+ .../managerdefault/AudioPolicyManager.cpp            | 12 ++++--------
+ 2 files changed, 7 insertions(+), 9 deletions(-)
+
+diff --git a/services/audiopolicy/common/include/policy.h b/services/audiopolicy/common/include/policy.h
+index 3d1d22b9e0..07f1458091 100644
+--- a/services/audiopolicy/common/include/policy.h
++++ b/services/audiopolicy/common/include/policy.h
+@@ -239,8 +239,10 @@ static inline audio_devices_t apm_extract_one_audio_device(
+         if (usbDevices.empty() == false) {
+             return usbDevices[0];
+         }
++        if (deviceTypes.count(AUDIO_DEVICE_OUT_WIRED_HEADPHONE) != 0) {
++            return AUDIO_DEVICE_OUT_WIRED_HEADPHONE;
+         /*[Amlogic end]----------------------------------------------------------*/
+-        if (deviceTypes.count(AUDIO_DEVICE_OUT_SPEAKER) != 0) {
++        } else if (deviceTypes.count(AUDIO_DEVICE_OUT_SPEAKER) != 0) {
+             return AUDIO_DEVICE_OUT_SPEAKER;
+         } else if (deviceTypes.count(AUDIO_DEVICE_OUT_SPEAKER_SAFE) != 0) {
+             return AUDIO_DEVICE_OUT_SPEAKER_SAFE;
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 682a47dba8..4cf541e727 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -6159,11 +6159,9 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
+         DeviceTypeSet   curSrcDevicesVector = deviceTypesFromBitMask(getDevicesForStream(AUDIO_STREAM_MUSIC));
+         audio_devices_t curDevice = Volume::getDeviceForVolume(curSrcDevicesVector);
+         DeviceTypeSet   curDeviceVector = deviceTypesFromBitMask(curDevice);
+-        bool            speakerGainApplied = false;
+         bool            bootVideoRunning = property_get_int32("service.bootvideo.exit", 0) == 1;
+ 
+-        if ((curDevice == AUDIO_DEVICE_OUT_SPEAKER || curDevice == AUDIO_DEVICE_OUT_WIRED_HEADPHONE) &&
+-            (outputDesc->isStrategyActive(streamToStrategy(AUDIO_STREAM_MUSIC)) || bootVideoRunning)) {
++        if (curDevice == AUDIO_DEVICE_OUT_SPEAKER || curDevice == AUDIO_DEVICE_OUT_WIRED_HEADPHONE) {
+             //ignoring the "index" passed as argument and always use MUSIC stream index
+             //for all stream types works on TV because all stream types are aliases of MUSIC.
+             device_category devCategory = Volume::getDeviceCategory(curDeviceVector);
+@@ -6185,11 +6183,9 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
+                 minMusicVolumeDb = -10000.0f;
+                 musicVolumeDb = -1837.0f;
+             }
+-            speakerGainApplied = outputDesc->updateGain(curDevice,
+-                                        musicVolumeDb, minMusicVolumeDb, maxMusicVolumeDb);
+-        }
+-        if (curDevice == AUDIO_DEVICE_OUT_HDMI_ARC ||
+-            (speakerGainApplied && (curDevice & AUDIO_DEVICE_OUT_SPEAKER) != 0)) {
++            outputDesc->updateGain(curDevice, musicVolumeDb, minMusicVolumeDb, maxMusicVolumeDb);
++            volumeDb = 0.0f;
++        } else if (curDevice == AUDIO_DEVICE_OUT_HDMI_ARC) {
+             volumeDb = 0.0f;
+         }
+     }
+-- 
+2.25.1
+
