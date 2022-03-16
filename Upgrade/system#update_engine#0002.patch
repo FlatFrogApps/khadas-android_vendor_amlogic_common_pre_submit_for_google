@@ -1,0 +1,117 @@
+From e80460e64c76410cdc9aca32d1434aeb68ec3f7d Mon Sep 17 00:00:00 2001
+From: Cheng Wang2 <cheng.wang2@amlogic.com>
+Date: Wed, 16 Mar 2022 17:44:29 +0800
+Subject: [PATCH] Check allocatable space correctly when sideloading on VAB
+
+On a device with Virtual A/B, when sideloading and there's
+not enough space in super partition to hold CoW, update_engine
+falls back to overwriting all source partitions. In that case,
+the allocatable space should be the whole super partition, not
+a half of it.
+
+Also update doc comments.
+
+Test: unit test. RecoveryErrorShouldDeleteSource fails without the patch
+but succeeds with the patch.
+
+Bug: 163613538
+Change-Id: I6bd6895a7eabeb4e8436e57b0ac6830c11d1e98f
+---
+ dynamic_partition_control_android.cc          | 12 +++++++++++-
+ dynamic_partition_control_android.h           |  7 +++++--
+ dynamic_partition_control_android_unittest.cc |  8 +++++---
+ dynamic_partition_test_utils.h                |  6 ++++--
+ 4 files changed, 25 insertions(+), 8 deletions(-)
+
+diff --git a/dynamic_partition_control_android.cc b/dynamic_partition_control_android.cc
+index ecd6252d..3103a381 100644
+--- a/dynamic_partition_control_android.cc
++++ b/dynamic_partition_control_android.cc
+@@ -780,6 +780,11 @@ bool DynamicPartitionControlAndroid::UpdatePartitionMetadata(
+     MetadataBuilder* builder,
+     uint32_t target_slot,
+     const DeltaArchiveManifest& manifest) {
++  // Check preconditions.
++  CHECK(!GetVirtualAbFeatureFlag().IsEnabled() || IsRecovery())
++      << "UpdatePartitionMetadata is called on a Virtual A/B device "
++         "but source partitions is not deleted. This is not allowed.";
++
+   // If applying downgrade from Virtual A/B to non-Virtual A/B, the left-over
+   // COW group needs to be deleted to ensure there are enough space to create
+   // target partitions.
+@@ -795,7 +800,12 @@ bool DynamicPartitionControlAndroid::UpdatePartitionMetadata(
+ 
+   std::string expr;
+   uint64_t allocatable_space = builder->AllocatableSpace();
+-  if (!GetDynamicPartitionsFeatureFlag().IsRetrofit()) {
++  // On device retrofitting dynamic partitions, allocatable_space = super.
++  // On device launching dynamic partitions w/o VAB,
++  //   allocatable_space = super / 2.
++  // On device launching dynamic partitions with VAB, allocatable_space = super.
++  if (!GetDynamicPartitionsFeatureFlag().IsRetrofit() &&
++      !GetVirtualAbFeatureFlag().IsEnabled()) {
+     allocatable_space /= 2;
+     expr = "half of ";
+   }
+diff --git a/dynamic_partition_control_android.h b/dynamic_partition_control_android.h
+index 8ad75933..c2bec1dc 100644
+--- a/dynamic_partition_control_android.h
++++ b/dynamic_partition_control_android.h
+@@ -183,8 +183,11 @@ class DynamicPartitionControlAndroid : public DynamicPartitionControlInterface {
+                             bool force_writable,
+                             std::string* path);
+ 
+-  // Update |builder| according to |partition_metadata|, assuming the device
+-  // does not have Virtual A/B.
++  // Update |builder| according to |partition_metadata|.
++  // - In Android mode, this is only called when the device
++  //   does not have Virtual A/B.
++  // - When sideloading, this maybe called as a fallback path if CoW cannot
++  //   be created.
+   bool UpdatePartitionMetadata(android::fs_mgr::MetadataBuilder* builder,
+                                uint32_t target_slot,
+                                const DeltaArchiveManifest& manifest);
+diff --git a/dynamic_partition_control_android_unittest.cc b/dynamic_partition_control_android_unittest.cc
+index 20819182..67fc701c 100644
+--- a/dynamic_partition_control_android_unittest.cc
++++ b/dynamic_partition_control_android_unittest.cc
+@@ -100,13 +100,15 @@ class DynamicPartitionControlAndroidTest : public ::testing::Test {
+   // |slot|.
+   void SetMetadata(uint32_t slot,
+                    const PartitionSuffixSizes& sizes,
+-                   uint32_t partition_attr = 0) {
++                   uint32_t partition_attr = 0,
++                   uint64_t super_size = kDefaultSuperSize) {
+     EXPECT_CALL(dynamicControl(),
+                 LoadMetadataBuilder(GetSuperDevice(slot), slot, _))
+         .Times(AnyNumber())
+-        .WillRepeatedly(Invoke([sizes, partition_attr](auto, auto, auto) {
++        .WillRepeatedly(Invoke([=](auto, auto) {
+           return NewFakeMetadata(PartitionSuffixSizesToManifest(sizes),
+-                                 partition_attr);
++                                 partition_attr,
++                                 super_size);
+         }));
+   }
+ 
+diff --git a/dynamic_partition_test_utils.h b/dynamic_partition_test_utils.h
+index 70a176b5..d701dce8 100644
+--- a/dynamic_partition_test_utils.h
++++ b/dynamic_partition_test_utils.h
+@@ -175,9 +175,11 @@ inline DeltaArchiveManifest PartitionSizesToManifest(
+ }
+ 
+ inline std::unique_ptr<MetadataBuilder> NewFakeMetadata(
+-    const DeltaArchiveManifest& manifest, uint32_t partition_attr = 0) {
++    const DeltaArchiveManifest& manifest,
++    uint32_t partition_attr = 0,
++    uint64_t super_size = kDefaultSuperSize) {
+   auto builder =
+-      MetadataBuilder::New(kDefaultSuperSize, kFakeMetadataSize, kMaxNumSlots);
++      MetadataBuilder::New(super_size, kFakeMetadataSize, kMaxNumSlots);
+   for (const auto& group : manifest.dynamic_partition_metadata().groups()) {
+     EXPECT_TRUE(builder->AddGroup(group.name(), group.size()));
+     for (const auto& partition_name : group.partition_names()) {
+-- 
+2.25.1
+
