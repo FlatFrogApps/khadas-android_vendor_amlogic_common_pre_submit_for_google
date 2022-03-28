@@ -1,0 +1,48 @@
+From 52de0668d34215d438ee212a5bae389e4942e05b Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Mon, 28 Mar 2022 11:03:32 +0800
+Subject: [PATCH] cec: only do duplication check when earc state is on [1/1]
+
+PD#SWPL-74319
+
+Problem:
+Arc may not be established when earc state if off even
+earc settings is on.
+
+Solution:
+only do duplication check when earc state is on.
+
+Verify:
+t3
+
+Change-Id: Ia8406c0df2116008a8ca7ba247acef46bc350bd9
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java    | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+index 0163bb2d8116..600b8283a232 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+@@ -227,7 +227,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+ 
+     protected void onEarcStateChanged(boolean earcOn) {
+         super.onEarcStateChanged(earcOn);
+-        if (mEarcOn == earcOn) {
++        if (earcOn && (mEarcOn == earcOn)) {
+             HdmiLogger.debug("no need to update for same earc state:" + earcOn);
+             return;
+         }
+@@ -981,7 +981,7 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+         }
+         if (avr.getPortId() != mService.getArcPortId()) {
+             // For HDMI CEC TESTR REASON, the arc port in tester is solid 0x1.
+-            HdmiLogger.warning("Avr is connected to arc port!");
++            HdmiLogger.warning("Avr is not connected to arc port!");
+         }
+         return true;
+     }
+-- 
+2.25.1
+
