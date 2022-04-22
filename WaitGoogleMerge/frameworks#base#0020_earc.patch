@@ -1,0 +1,41 @@
+From 9a05d3e12b514bdc99e5e3118f035444bebf0210 Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Fri, 22 Apr 2022 11:41:49 +0800
+Subject: [PATCH] cec: ignore earc settings changes if earc is not supported
+ [1/1]
+
+PD#SWPL-77869
+
+Problem:
+earc settings changes but earc is not supported.
+
+Solution:
+ignore earc settings changes if earc is not supported
+
+Verify:
+t7
+
+Change-Id: I2652129751416dfac261947c9ff43c4eb61dd94a
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../core/java/com/android/server/hdmi/HdmiControlService.java | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiControlService.java b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+index 145640a292b3..b590accaca9c 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiControlService.java
++++ b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+@@ -852,6 +852,10 @@ public class HdmiControlService extends SystemService {
+     }
+ 
+     public void onEarcSettingChanged(boolean on) {
++        if (!mEarcSupported) {
++            HdmiLogger.info("onEarcSettingChanged but earc not supported");
++            return;
++        }
+         if (tv() != null) {
+             tv().onEarcSettingChanged(on);
+         } else if (audioSystem() != null) {
+-- 
+2.25.1
+
