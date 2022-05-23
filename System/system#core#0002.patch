@@ -1,0 +1,233 @@
+From c798b2b89c6275fbfd494d9de013db87ece174b9 Mon Sep 17 00:00:00 2001
+From: Tao Zeng <tao.zeng@amlogic.com>
+Date: Tue, 17 May 2022 15:08:41 +0800
+Subject: [PATCH] debugged: show pfn of each register [1/2]
+
+PD#TV-54239
+
+Problem:
+No pfn information of each registers
+
+Solution:
+read pagemap and get pfn
+
+Verify:
+t5d am301
+
+Signed-off-by: Tao Zeng <tao.zeng@amlogic.com>
+Change-Id: If869ae5b6923098e5cbe5b300b35cf00587bf287
+---
+ debuggerd/libdebuggerd/tombstone.cpp          | 109 ++++++++++++++++--
+ libunwindstack/include/unwindstack/Unwinder.h |   3 +
+ 2 files changed, 103 insertions(+), 9 deletions(-)
+
+diff --git a/debuggerd/libdebuggerd/tombstone.cpp b/debuggerd/libdebuggerd/tombstone.cpp
+index fd52e8113..2a3dfd6a9 100644
+--- a/debuggerd/libdebuggerd/tombstone.cpp
++++ b/debuggerd/libdebuggerd/tombstone.cpp
+@@ -204,7 +204,9 @@ static std::string get_addr_string(uint64_t addr) {
+   return addr_str;
+ }
+ 
+-static void dump_abort_message(log_t* log, unwindstack::Memory* process_memory, uint64_t address) {
++static void dump_abort_message(log_t* log, unwindstack::Memory* process_memory, uint64_t address, unsigned long *abort_addr) {
++  char *p;
++
+   if (address == 0) {
+     return;
+   }
+@@ -231,8 +233,59 @@ static void dump_abort_message(log_t* log, unwindstack::Memory* process_memory,
+   }
+ 
+   _LOG(log, logtype::HEADER, "Abort message: '%s'\n", &msg[0]);
++  /* try to dump pfn of abort address */
++  p = strstr(&msg[0], "at address ");
++  if (p) {
++    sscanf(p, "at address %lx\n", abort_addr);
++  }
++}
++
++
++#define PAGE_SIZE		4096
++int64_t get_memory_pfn(uint64_t reg_value, pid_t pid)
++{
++	FILE *f;
++	char path[128] = {};
++	uint64_t offset;
++	uint64_t pfn = 0;
++	int status;
++
++	offset = (reg_value / PAGE_SIZE) * sizeof(reg_value);
++	//ALOGD("%s, reg:%llx offset:%llx, pid:%d\n", __func__, reg_value, offset, pid);
++	if (pid < 0) {
++		ALOGD("%s, invalid pid:%d\n", __func__, pid);
++		return -1;
++	}
++
++	sprintf(path, "/proc/%d/pagemap", pid);
++	f = fopen(path, "rb");
++	if (!f) {
++		ALOGD("%s, open %s failed:%s\n", __func__, path, strerror(errno));
++		return -2;
++	}
++	status = fseek(f, offset, SEEK_SET);
++	if (status) {
++		ALOGD("%s, seek %s failed:%s\n", __func__, path, strerror(errno));
++		fclose(f);
++		return -3;
++	}
++	status = fread(&pfn, 1, 8, f);
++	if (status < 0) {
++		ALOGD("%s, read %s failed:%d\n", __func__, path, status);
++		fclose(f);
++		return -4;
++	}
++	//ALOGD("%s, pfn:%llx, status:%d\n", __func__, pfn, status);
++	if (pfn & (1ULL << 63)) {	// pfn valid
++		fclose(f);
++		return pfn & 0x7FFFFFFFFFFFFFUL;
++	}
++	fclose(f);
++	//ALOGD("%s, pfn:%llx, invalid\n", __func__, pfn);
++	return -5;
+ }
+ 
++
+ static void dump_all_maps(log_t* log, unwindstack::Unwinder* unwinder, uint64_t addr) {
+   bool print_fault_address_marker = addr;
+ 
+@@ -311,18 +364,29 @@ static void dump_all_maps(log_t* log, unwindstack::Unwinder* unwinder, uint64_t
+ }
+ 
+ static void print_register_row(log_t* log,
+-                               const std::vector<std::pair<std::string, uint64_t>>& registers) {
++                               const std::vector<std::pair<std::string, uint64_t>>& registers, pid_t pid) {
++  int64_t pfn;
++  char pfn_buf[64];
+   std::string output;
++
+   for (auto& [name, value] : registers) {
++    memset(pfn_buf, 0, sizeof(pfn_buf));
++    pfn = get_memory_pfn(value, pid);
++    if (pfn >= 0) {
++      sprintf(pfn_buf, ", PFN:%08llx", pfn);
++    } else {
++      sprintf(pfn_buf, ", PFN:--------");
++    }
+     output += android::base::StringPrintf("  %-3s %0*" PRIx64, name.c_str(),
+                                           static_cast<int>(2 * sizeof(void*)),
+                                           static_cast<uint64_t>(value));
++    output += pfn_buf;
+   }
+ 
+   _LOG(log, logtype::REGISTERS, "  %s\n", output.c_str());
+ }
+ 
+-void dump_registers(log_t* log, unwindstack::Regs* regs) {
++void dump_registers(log_t* log, unwindstack::Regs* regs, pid_t pid) {
+   // Split lr/sp/pc into their own special row.
+   static constexpr size_t column_count = 4;
+   std::vector<std::pair<std::string, uint64_t>> current_row;
+@@ -338,7 +402,10 @@ void dump_registers(log_t* log, unwindstack::Regs* regs) {
+   static constexpr const char* special_registers[] = {};
+ #endif
+ 
+-  regs->IterateRegisters([log, &current_row, &special_row](const char* name, uint64_t value) {
++  //pid = check_pid(pid);
++
++  _LOG(log, logtype::REGISTERS, "vm_pid:%d\n", pid);
++  regs->IterateRegisters([log, &current_row, &special_row, pid](const char* name, uint64_t value) {
+     auto row = &current_row;
+     for (const char* special_name : special_registers) {
+       if (strcmp(special_name, name) == 0) {
+@@ -349,16 +416,16 @@ void dump_registers(log_t* log, unwindstack::Regs* regs) {
+ 
+     row->emplace_back(name, value);
+     if (current_row.size() == column_count) {
+-      print_register_row(log, current_row);
++      print_register_row(log, current_row, pid);
+       current_row.clear();
+     }
+   });
+ 
+   if (!current_row.empty()) {
+-    print_register_row(log, current_row);
++    print_register_row(log, current_row, pid);
+   }
+ 
+-  print_register_row(log, special_row);
++  print_register_row(log, special_row, pid);
+ }
+ 
+ void dump_memory_and_code(log_t* log, unwindstack::Maps* maps, unwindstack::Memory* memory,
+@@ -375,9 +442,25 @@ void dump_memory_and_code(log_t* log, unwindstack::Maps* maps, unwindstack::Memo
+   });
+ }
+ 
++void dump_abort_memory(log_t* log, unwindstack::Maps* maps, unwindstack::Memory* memory,
++                         uint64_t abort_addr) {
++  std::string label{"Abort address memory"};
++  if (maps) {
++    unwindstack::MapInfo* map_info = maps->Find(abort_addr);
++    if (map_info != nullptr && !map_info->name.empty()) {
++      label += " (" + map_info->name + ")";
++    }
++  }
++  dump_memory(log, memory, abort_addr, label);
++}
++
+ static bool dump_thread(log_t* log, unwindstack::Unwinder* unwinder, const ThreadInfo& thread_info,
+                         uint64_t abort_msg_address, bool primary_thread,
+                         const GwpAsanCrashData& gwp_asan_crash_data) {
++  unwindstack::UnwinderFromPid *tmp = static_cast<unwindstack::UnwinderFromPid *>(unwinder);
++  unsigned long abort_addr = 0;
++  unsigned long abort_pfn;
++
+   log->current_tid = thread_info.tid;
+   if (!primary_thread) {
+     _LOG(log, logtype::THREAD, "--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---\n");
+@@ -396,10 +479,16 @@ static bool dump_thread(log_t* log, unwindstack::Unwinder* unwinder, const Threa
+   }
+ 
+   if (primary_thread) {
+-    dump_abort_message(log, unwinder->GetProcessMemory().get(), abort_msg_address);
++    dump_abort_message(log, unwinder->GetProcessMemory().get(), abort_msg_address, &abort_addr);
+   }
+ 
+-  dump_registers(log, thread_info.registers.get());
++  if (abort_addr) {
++    abort_pfn = get_memory_pfn(abort_addr, tmp->get_pid());
++    if (abort_pfn >= 0)
++    _LOG(log, logtype::HEADER, "Abort address PFN: %08lx\n", abort_pfn);
++  }
++  // raw crash thread is exited here, we need use cloned vm_pid to get pfn
++  dump_registers(log, thread_info.registers.get(), tmp->get_pid());
+ 
+   // Unwind will mutate the registers, so make a copy first.
+   std::unique_ptr<unwindstack::Regs> regs_copy(thread_info.registers->Clone());
+@@ -422,6 +511,8 @@ static bool dump_thread(log_t* log, unwindstack::Unwinder* unwinder, const Threa
+     }
+ 
+     unwindstack::Maps* maps = unwinder->GetMaps();
++    if (abort_addr)
++      dump_abort_memory(log, maps, unwinder->GetProcessMemory().get(), abort_addr);
+     dump_memory_and_code(log, maps, unwinder->GetProcessMemory().get(),
+                          thread_info.registers.get());
+     if (maps != nullptr) {
+diff --git a/libunwindstack/include/unwindstack/Unwinder.h b/libunwindstack/include/unwindstack/Unwinder.h
+index 67762c0bd..f2d96295b 100644
+--- a/libunwindstack/include/unwindstack/Unwinder.h
++++ b/libunwindstack/include/unwindstack/Unwinder.h
+@@ -142,6 +142,9 @@ class UnwinderFromPid : public Unwinder {
+   virtual ~UnwinderFromPid() = default;
+ 
+   bool Init(ArchEnum arch);
++  pid_t get_pid(void) {
++    return pid_;
++  }
+ 
+  private:
+   pid_t pid_;
+-- 
+2.35.1
+
