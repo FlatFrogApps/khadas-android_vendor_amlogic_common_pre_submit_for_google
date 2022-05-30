@@ -1,0 +1,105 @@
+From 629eb3a39b882a83f2d184d2e5b0eefb61dd3c7a Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Mon, 30 May 2022 23:34:38 +0800
+Subject: [PATCH] cec: call input change listener after boot [1/1]
+
+PD#SWPL-82714
+
+Problem:
+tv input app may not receive the one touch play
+information before boot.
+
+Solution:
+call input change listener after boot.
+
+Verify:
+t7
+
+Change-Id: If230bccd082228baf5c3d6d6a3493c4843642d67
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../android/server/hdmi/HdmiCecLocalDevice.java  |  4 ++++
+ .../server/hdmi/HdmiCecLocalDeviceTv.java        | 16 +++++++++++++++-
+ .../android/server/hdmi/HdmiControlService.java  | 10 ++++++++++
+ 3 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevice.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevice.java
+index 9902afa70666..cb9caca81ca8 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevice.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevice.java
+@@ -731,6 +731,10 @@ abstract class HdmiCecLocalDevice {
+         return false;
+     }
+ 
++    protected void onBootCompleted() {
++
++    }
++
+     @ServiceThreadOnly
+     final void handleAddressAllocated(int logicalAddress, int reason) {
+         assertRunOnServiceThread();
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+index 404f32467f25..01b547aeba0b 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceTv.java
+@@ -96,6 +96,8 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+     @GuardedBy("mLock")
+     private boolean mSystemAudioMute = false;
+ 
++    private HdmiDeviceInfo mDelayedActiveSource;
++
+     // Copy of mDeviceInfos to guarantee thread-safety.
+     @GuardedBy("mLock")
+     private List<HdmiDeviceInfo> mSafeAllDeviceInfos = Collections.emptyList();
+@@ -435,6 +437,14 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+         }
+     }
+ 
++
++    protected void onBootCompleted() {
++        if (mDelayedActiveSource != null) {
++            HdmiLogger.debug("tv onBootCompleted");
++            mService.invokeInputChangeListener(mDelayedActiveSource);
++        }
++    }
++
+     @ServiceThreadOnly
+     void updateActiveInput(int path, boolean notifyInputChange) {
+         assertRunOnServiceThread();
+@@ -454,7 +464,11 @@ final class HdmiCecLocalDeviceTv extends HdmiCecLocalDevice {
+                 }
+             }
+             HdmiLogger.info("updateActiveInput " + info);
+-            mService.invokeInputChangeListener(info);
++            if (mService.isBootCompeted()) {
++                mService.invokeInputChangeListener(info);
++            } else {
++                mDelayedActiveSource = info;
++            }
+         }
+     }
+ 
+diff --git a/services/core/java/com/android/server/hdmi/HdmiControlService.java b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+index b590accaca9c..87c5bbe0b350 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiControlService.java
++++ b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+@@ -579,6 +579,16 @@ public class HdmiControlService extends SystemService {
+         }
+         mBootComplete = true;
+         onEarcStateChanged(isEarcOn());
++
++        mHandler.postDelayed(()->{
++            if (tv() != null) {
++                tv().onBootCompleted();
++            }
++        }, HdmiConfig.TIMEOUT_MS);
++    }
++
++    boolean isBootCompeted() {
++        return mBootComplete;
+     }
+ 
+     /**
+-- 
+2.25.1
+
