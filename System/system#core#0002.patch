@@ -110,7 +110,7 @@ index fd52e8113..2a3dfd6a9 100644
 +    memset(pfn_buf, 0, sizeof(pfn_buf));
 +    pfn = get_memory_pfn(value, pid);
 +    if (pfn >= 0) {
-+      sprintf(pfn_buf, ", PFN:%08llx", pfn);
++      sprintf(pfn_buf, ", PFN: %" PRId64 "", pfn);
 +    } else {
 +      sprintf(pfn_buf, ", PFN:--------");
 +    }
