@@ -1,0 +1,48 @@
+From 48bfab66d9d036f596e560b26d7467ea1857f82c Mon Sep 17 00:00:00 2001
+From: Cheng Wang2 <cheng.wang2@amlogic.com>
+Date: Mon, 27 Jun 2022 10:41:27 +0800
+Subject: [PATCH] [WA]T7: system_server crash on suspend/resume test
+
+PD#SWPL-85663
+
+Problem:
+init: sys_prop: recv data is not properly obtained.
+
+Solution:
+The unplugging envent between suspend/resume, need retry
+
+Verify:
+T7
+
+Signed-off-by: Cheng Wang2 <cheng.wang2@amlogic.com>
+Change-Id: Iee07f4a864c63a79ea1397eebc74ca2062d59115
+---
+ core/java/android/app/PropertyInvalidatedCache.java | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/core/java/android/app/PropertyInvalidatedCache.java b/core/java/android/app/PropertyInvalidatedCache.java
+index 58068769e63a..b0400232d50f 100644
+--- a/core/java/android/app/PropertyInvalidatedCache.java
++++ b/core/java/android/app/PropertyInvalidatedCache.java
+@@ -545,7 +545,17 @@ public abstract class PropertyInvalidatedCache<Query, Result> {
+                             nonce,
+                             newValueString));
+         }
+-        SystemProperties.set(name, newValueString);
++        try {
++            SystemProperties.set(name, newValueString);
++        } catch (RuntimeException e) {
++          Log.d(TAG,
++                    String.format("invalidating cache [%s]: [%s] -> [%s]",
++                            name,
++                            nonce,
++                            newValueString));
++          Log.d(TAG, "the exception may come from suspend/resume, need to retry");
++          SystemProperties.set(name, newValueString);
++        }
+         long invalidateCount = sInvalidates.getOrDefault(name, (long) 0);
+         sInvalidates.put(name, ++invalidateCount);
+     }
+-- 
+2.25.1
+
