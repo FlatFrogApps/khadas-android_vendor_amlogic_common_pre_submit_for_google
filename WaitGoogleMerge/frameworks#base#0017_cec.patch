@@ -1,0 +1,178 @@
+From 3e0273ad116fc886f92a720db8d4b422b77aa6e7 Mon Sep 17 00:00:00 2001
+From: "an.xi" <an.xi@amlogic.com>
+Date: Fri, 8 Jul 2022 14:36:50 +0800
+Subject: [PATCH] cec: add property of sending <Inactive Source> and update
+ features [2/2]
+
+PD#SWPL-67450
+
+Problem:
+tv like sony may switch to a different channel when
+it receives <Inactive Source>, and it could cause
+confusion and hdmi issues.
+
+Solution:
+cts demands this message, so add property of sending
+<Inactive Source>.
+Besides, add the following return modifications.
+1.SWPL-85432 send TV_INPUT key to TV.
+2.SWPL-82193 SWPL-83991 send <Standby> before suspends.
+3.SWPL-86365 restore the wasActiveSource condition.
+
+Verify:
+ohm
+
+Change-Id: I4c8cc18795c6e6dbd5440aae4cb97af90692e1c8
+Signed-off-by: an.xi <an.xi@amlogic.com>
+---
+ .../hdmi/HdmiCecLocalDevicePlayback.java      | 21 +++++------
+ .../server/hdmi/HdmiCecLocalDeviceSource.java |  5 +--
+ .../server/hdmi/HdmiControlService.java       |  5 ++-
+ .../server/policy/PhoneWindowManager.java     | 35 +++++++++++++++++++
+ 4 files changed, 49 insertions(+), 17 deletions(-)
+
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
+index 3382076331f7..f7af104329a9 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
+@@ -44,6 +44,8 @@ import java.util.Locale;
+ public class HdmiCecLocalDevicePlayback extends HdmiCecLocalDeviceSource {
+     private static final String TAG = "HdmiCecLocalDevicePlayback";
+ 
++    private static final String SYSTEM_PROP_INACTIVE_SOURCE = "persist.sys.hdmi.inactive_source";
++
+     private static final boolean SET_MENU_LANGUAGE =
+             HdmiProperties.set_menu_language().orElse(false);
+     // System property indicating that the screen should remain off until an explicit user action
+@@ -230,22 +232,17 @@ public class HdmiCecLocalDevicePlayback extends HdmiCecLocalDeviceSource {
+         if (!mService.isControlEnabled()) {
+             return;
+         }
+-        if (mIsActiveSource) {
++        // Make sure playback could call one touch play when it boots.
++        boolean wasActiveSource = mIsActiveSource;
++        if (mIsActiveSource && SystemProperties.getBoolean(SYSTEM_PROP_INACTIVE_SOURCE, true)) {
+             mService.sendCecCommand(HdmiCecMessageBuilder.buildInactiveSource(
+                     mAddress, mService.getPhysicalAddress()));
+         }
+-        // Cancel the feature of no sending <Standby> if it's in not active state.
+-        // There are 2 reasons:
+-        // 1.Tv might broadcast routing message which make playback into inactive state when tv
+-        // receives <InActive Source> message.
+-        // 2.The active state of playback might not be initiated in some scenarios. For example,
+-        // playback hotplugs in tv's current active port and tv does not send routing message.
+-        // boolean wasActiveSource = mIsActiveSource;
+-        // Invalidate the internal active source record when goes to standby
+-        // This set will also update mIsActiveSource
++
+         mService.setActiveSource(Constants.ADDR_INVALID, Constants.INVALID_PHYSICAL_ADDRESS);
+-        if (initiatedByCec || !mAutoTvOff /*|| !wasActiveSource*/) {
+-            HdmiLogger.info("onStandby no send <Standby> with mAutoTvOff=" + mAutoTvOff);
++        if (initiatedByCec || !mAutoTvOff || !wasActiveSource) {
++            HdmiLogger.info("onStandby no send <Standby> with mAutoTvOff=" + mAutoTvOff
++                + " wasActiveSource=" + wasActiveSource);
+             return;
+         }
+         switch (standbyAction) {
+diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceSource.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceSource.java
+index 0939a5b31d29..905366d719dd 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceSource.java
++++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceSource.java
+@@ -101,10 +101,7 @@ abstract class HdmiCecLocalDeviceSource extends HdmiCecLocalDevice {
+     @ServiceThreadOnly
+     protected void sendStandby(int deviceId) {
+         assertRunOnServiceThread();
+-
+-        // Send standby to TV only for now
+-        int targetAddress = Constants.ADDR_TV;
+-        mService.sendCecCommand(HdmiCecMessageBuilder.buildStandby(mAddress, targetAddress));
++        onStandby(false, HdmiControlService.STANDBY_SHUTDOWN);
+     }
+ 
+     @ServiceThreadOnly
+diff --git a/services/core/java/com/android/server/hdmi/HdmiControlService.java b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+index bc42f3b2fe7e..aee0c6ebca93 100644
+--- a/services/core/java/com/android/server/hdmi/HdmiControlService.java
++++ b/services/core/java/com/android/server/hdmi/HdmiControlService.java
+@@ -3233,7 +3233,10 @@ public class HdmiControlService extends SystemService {
+         }
+         mPowerStatus = HdmiControlManager.POWER_STATUS_STANDBY;
+         for (HdmiCecLocalDevice device : mCecController.getLocalDeviceList()) {
+-            device.onStandby(mStandbyMessageReceived, standbyAction);
++            // playback standby is done in sendStandby method.
++            if (device.getType() != HdmiDeviceInfo.DEVICE_PLAYBACK) {
++                device.onStandby(mStandbyMessageReceived, standbyAction);
++            }
+         }
+         mStandbyMessageReceived = false;
+         mCecController.runOnIoThread(()->{
+diff --git a/services/core/java/com/android/server/policy/PhoneWindowManager.java b/services/core/java/com/android/server/policy/PhoneWindowManager.java
+index f894672e3cfc..c9dad9e6f0c2 100644
+--- a/services/core/java/com/android/server/policy/PhoneWindowManager.java
++++ b/services/core/java/com/android/server/policy/PhoneWindowManager.java
+@@ -1155,6 +1155,12 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+     }
+ 
+     private void goToSleep(long eventTime, int reason, int flags) {
++        final HdmiControl hdmiControl = getHdmiControl();
++        if (hdmiControl != null) {
++            Slog.d(TAG, "turn off tv if possible");
++            hdmiControl.turnOffTv();
++        }
++
+         mRequestedOrGoingToSleep = true;
+         mPowerManager.goToSleep(eventTime, reason, flags);
+     }
+@@ -1509,6 +1515,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+             if (manager != null) {
+                 client = manager.getPlaybackClient();
+             }
++            if (client == null) {
++                return null;
++            }
+             mHdmiControl = new HdmiControl(client);
+         }
+         return mHdmiControl;
+@@ -1534,6 +1543,20 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+                 }
+             });
+         }
++
++        public void turnOffTv() {
++            if (mClient == null) {
++                return;
++            }
++            mClient.sendStandby();
++        }
++
++        public void sendKeyEvent(int keyCode, boolean isPressed) {
++            if (mClient == null) {
++                return;
++            }
++            mClient.sendKeyEvent(keyCode, isPressed);
++        }
+     }
+ 
+     private void launchAllAppsAction() {
+@@ -4004,6 +4027,18 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+                 }
+                 break;
+             }
++            case KeyEvent.KEYCODE_TV_INPUT: {
++                if (down) {
++                    final HdmiControl hdmiControl = getHdmiControl();
++                    if (hdmiControl != null) {
++                        Slog.i(TAG, "send tv_input key to tv");
++                        hdmiControl.sendKeyEvent(KeyEvent.KEYCODE_TV_INPUT, true);
++                        hdmiControl.sendKeyEvent(KeyEvent.KEYCODE_TV_INPUT, false);
++                        result &= ~ACTION_PASS_TO_USER;
++                    }
++                }
++                break;
++            }
+         }
+ 
+         // Intercept the Accessibility keychord for TV (DPAD_DOWN + Back) before the keyevent is
+-- 
+2.25.1
+
