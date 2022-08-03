@@ -1,0 +1,498 @@
+From c63568ff4b399d82c7fb4aad12e342f83b95cec7 Mon Sep 17 00:00:00 2001
+From: Kuowei Li <kuowei.li@mediatek.com>
+Date: Thu, 13 Aug 2020 14:34:17 +0800
+Subject: [PATCH] audio: add implementation for TV related API
+
+1. TunerConfiguration.
+2. AudioDescriptionMixLevel getter/setter.
+3. DualMonoMode getter/setter.
+4. PlaybackRate getter/setter.
+
+Test: TIS player with instrumented HAL
+Test: atest AudioTrackTest#testTunerConfiguration
+Test: atest AudioTrackTest#testDualMonoMode
+Test: atest AudioTrackTest#testAudioDescriptionMixLevel
+Test: atest AudioManagerTest#testGetAdditionalOutputDeviceDelay
+Bug: 173482792
+Merged-In: I47b022154983283aeeac41cf506818009e88995b
+Change-Id: I47b022154983283aeeac41cf506818009e88995b
+---
+ core/jni/android_media_AudioErrors.h          |   2 +-
+ core/jni/android_media_AudioTrack.cpp         |  60 +++--
+ media/java/android/media/AudioManager.java    |  23 +-
+ media/java/android/media/AudioTrack.java      |  15 ++
+ media/java/android/media/IAudioService.aidl   |   6 +
+ .../android/server/audio/AudioService.java    | 207 ++++++++++++++++++
+ 6 files changed, 272 insertions(+), 41 deletions(-)
+ mode change 100755 => 100644 media/java/android/media/IAudioService.aidl
+
+diff --git a/core/jni/android_media_AudioErrors.h b/core/jni/android_media_AudioErrors.h
+index c17a020f74fc..13c9115c1e56 100644
+--- a/core/jni/android_media_AudioErrors.h
++++ b/core/jni/android_media_AudioErrors.h
+@@ -35,7 +35,7 @@ enum {
+     AUDIO_JAVA_WOULD_BLOCK        = -7,
+ };
+ 
+-static inline jint nativeToJavaStatus(status_t status) {
++static constexpr inline jint nativeToJavaStatus(status_t status) {
+     switch (status) {
+     case NO_ERROR:
+         return AUDIO_JAVA_SUCCESS;
+diff --git a/core/jni/android_media_AudioTrack.cpp b/core/jni/android_media_AudioTrack.cpp
+index 7a5c38385f32..baec30faa37c 100644
+--- a/core/jni/android_media_AudioTrack.cpp
++++ b/core/jni/android_media_AudioTrack.cpp
+@@ -368,29 +368,25 @@ static jint android_media_AudioTrack_setup(JNIEnv *env, jobject thiz, jobject we
+             offloadInfo.has_video = false;
+             offloadInfo.stream_type = AUDIO_STREAM_MUSIC; //required for offload
+         }
+-
+         // initialize the native AudioTrack object
+         status_t status = NO_ERROR;
+         switch (memoryMode) {
+         case MODE_STREAM:
+-            status = lpTrack->set(AUDIO_STREAM_DEFAULT, // stream type, but more info conveyed
+-                                                        // in paa (last argument)
+-                                  sampleRateInHertz,
+-                                  format, // word length, PCM
+-                                  nativeChannelMask, offload ? 0 : frameCount,
+-                                  offload ? AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD
+-                                          : AUDIO_OUTPUT_FLAG_NONE,
+-                                  audioCallback,
+-                                  &(lpJniStorage->mCallbackData), // callback, callback data (user)
+-                                  0,    // notificationFrames == 0 since not using EVENT_MORE_DATA
+-                                        // to feed the AudioTrack
+-                                  0,    // shared mem
+-                                  true, // thread can call Java
+-                                  sessionId, // audio session ID
+-                                  offload ? AudioTrack::TRANSFER_SYNC_NOTIF_CALLBACK
+-                                          : AudioTrack::TRANSFER_SYNC,
+-                                  offload ? &offloadInfo : NULL, -1, -1, // default uid, pid values
+-                                  paa.get());
++            status = lpTrack->set(
++                    AUDIO_STREAM_DEFAULT,// stream type, but more info conveyed in paa (last argument)
++                    sampleRateInHertz,
++                    format,// word length, PCM
++                    nativeChannelMask,
++                    offload ? 0 : frameCount,
++                    offload ? AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD : AUDIO_OUTPUT_FLAG_NONE,
++                    audioCallback, &(lpJniStorage->mCallbackData),//callback, callback data (user)
++                    0,// notificationFrames == 0 since not using EVENT_MORE_DATA to feed the AudioTrack
++                    0,// shared mem
++                    true,// thread can call Java
++                    sessionId,// audio session ID
++                    offload ? AudioTrack::TRANSFER_SYNC_NOTIF_CALLBACK : AudioTrack::TRANSFER_SYNC,
++                    offload ? &offloadInfo : NULL, -1, -1, // default uid, pid values
++                    paa.get());
+             break;
+ 
+         case MODE_STATIC:
+@@ -1364,8 +1360,7 @@ static jint android_media_AudioTrack_setAudioDescriptionMixLeveldB(JNIEnv *env,
+         return (jint)AUDIO_JAVA_ERROR;
+     }
+ 
+-    // TODO: replace in r-dev or r-tv-dev with code if HW is able to set audio mix level.
+-    return (jint)AUDIO_JAVA_ERROR;
++    return nativeToJavaStatus(lpTrack->setAudioDescriptionMixLevel(level));
+ }
+ 
+ static jint android_media_AudioTrack_getAudioDescriptionMixLeveldB(JNIEnv *env, jobject thiz,
+@@ -1381,12 +1376,10 @@ static jint android_media_AudioTrack_getAudioDescriptionMixLeveldB(JNIEnv *env,
+         return (jint)AUDIO_JAVA_ERROR;
+     }
+ 
+-    // TODO: replace in r-dev or r-tv-dev with code if HW is able to set audio mix level.
+-    // By contract we can return -infinity if unsupported.
+-    *nativeLevel = -std::numeric_limits<float>::infinity();
++    status_t status = lpTrack->getAudioDescriptionMixLevel(reinterpret_cast<float *>(nativeLevel));
+     env->ReleasePrimitiveArrayCritical(level, nativeLevel, 0 /* mode */);
+-    nativeLevel = nullptr;
+-    return (jint)AUDIO_JAVA_SUCCESS;
++
++    return nativeToJavaStatus(status);
+ }
+ 
+ static jint android_media_AudioTrack_setDualMonoMode(JNIEnv *env, jobject thiz, jint dualMonoMode) {
+@@ -1396,8 +1389,8 @@ static jint android_media_AudioTrack_setDualMonoMode(JNIEnv *env, jobject thiz,
+         return (jint)AUDIO_JAVA_ERROR;
+     }
+ 
+-    // TODO: replace in r-dev or r-tv-dev with code if HW is able to set audio mix level.
+-    return (jint)AUDIO_JAVA_ERROR;
++    return nativeToJavaStatus(
++            lpTrack->setDualMonoMode(static_cast<audio_dual_mono_mode_t>(dualMonoMode)));
+ }
+ 
+ static jint android_media_AudioTrack_getDualMonoMode(JNIEnv *env, jobject thiz,
+@@ -1407,18 +1400,17 @@ static jint android_media_AudioTrack_getDualMonoMode(JNIEnv *env, jobject thiz,
+         ALOGE("%s: AudioTrack not initialized", __func__);
+         return (jint)AUDIO_JAVA_ERROR;
+     }
+-    jfloat *nativeDualMonoMode = (jfloat *)env->GetPrimitiveArrayCritical(dualMonoMode, NULL);
++    jint *nativeDualMonoMode = (jint *)env->GetPrimitiveArrayCritical(dualMonoMode, NULL);
+     if (nativeDualMonoMode == nullptr) {
+         ALOGE("%s: Cannot retrieve dualMonoMode pointer", __func__);
+         return (jint)AUDIO_JAVA_ERROR;
+     }
+ 
+-    // TODO: replace in r-dev or r-tv-dev with code if HW is able to select dual mono mode.
+-    // By contract we can return DUAL_MONO_MODE_OFF if unsupported.
+-    *nativeDualMonoMode = 0; // DUAL_MONO_MODE_OFF for now.
++    status_t status = lpTrack->getDualMonoMode(
++            reinterpret_cast<audio_dual_mono_mode_t *>(nativeDualMonoMode));
+     env->ReleasePrimitiveArrayCritical(dualMonoMode, nativeDualMonoMode, 0 /* mode */);
+-    nativeDualMonoMode = nullptr;
+-    return (jint)AUDIO_JAVA_SUCCESS;
++
++    return nativeToJavaStatus(status);
+ }
+ 
+ // ----------------------------------------------------------------------------
+diff --git a/media/java/android/media/AudioManager.java b/media/java/android/media/AudioManager.java
+index 3ac71b2cff1d..3c3c4a60273b 100755
+--- a/media/java/android/media/AudioManager.java
++++ b/media/java/android/media/AudioManager.java
+@@ -4967,8 +4967,12 @@ public class AudioManager {
+     public boolean setAdditionalOutputDeviceDelay(
+             @NonNull AudioDeviceInfo device, @IntRange(from = 0) long delayMillis) {
+         Objects.requireNonNull(device);
+-        // Implement the setter in r-dev or r-tv-dev as needed.
+-        return false;
++        try {
++            return getService().setAdditionalOutputDeviceDelay(
++                new AudioDeviceAttributes(device), delayMillis);
++        } catch (RemoteException e) {
++            throw e.rethrowFromSystemServer();
++        }
+     }
+ 
+     /**
+@@ -4983,8 +4987,11 @@ public class AudioManager {
+     @IntRange(from = 0)
+     public long getAdditionalOutputDeviceDelay(@NonNull AudioDeviceInfo device) {
+         Objects.requireNonNull(device);
+-        // Implement the getter in r-dev or r-tv-dev as needed.
+-        return 0;
++        try {
++            return getService().getAdditionalOutputDeviceDelay(new AudioDeviceAttributes(device));
++        } catch (RemoteException e) {
++            throw e.rethrowFromSystemServer();
++        }
+     }
+ 
+     /**
+@@ -5001,8 +5008,12 @@ public class AudioManager {
+     @IntRange(from = 0)
+     public long getMaxAdditionalOutputDeviceDelay(@NonNull AudioDeviceInfo device) {
+         Objects.requireNonNull(device);
+-        // Implement the getter in r-dev or r-tv-dev as needed.
+-        return 0;
++        try {
++            return getService().getMaxAdditionalOutputDeviceDelay(
++                    new AudioDeviceAttributes(device));
++        } catch (RemoteException e) {
++            throw e.rethrowFromSystemServer();
++        }
+     }
+ 
+     /**
+diff --git a/media/java/android/media/AudioTrack.java b/media/java/android/media/AudioTrack.java
+index de2a7b2c15e3..9fcec1b542b8 100644
+--- a/media/java/android/media/AudioTrack.java
++++ b/media/java/android/media/AudioTrack.java
+@@ -1263,6 +1263,21 @@ public class AudioTrack extends PlayerBase
+ 
+             // TODO: Check mEncapsulationMode compatibility with MODE_STATIC, etc?
+ 
++            // If the buffer size is not specified in streaming mode,
++            // use a single frame for the buffer size and let the
++            // native code figure out the minimum buffer size.
++            if (mMode == MODE_STREAM && mBufferSizeInBytes == 0) {
++                int bytesPerSample = 1;
++                if (AudioFormat.isEncodingLinearFrames(mFormat.getEncoding())) {
++                    try {
++                        bytesPerSample = mFormat.getBytesPerSample(mFormat.getEncoding());
++                    } catch (IllegalArgumentException e) {
++                        // do nothing
++                    }
++                }
++                mBufferSizeInBytes = mFormat.getChannelCount() * bytesPerSample;
++            }
++
+             try {
+                 // If the buffer size is not specified in streaming mode,
+                 // use a single frame for the buffer size and let the
+diff --git a/media/java/android/media/IAudioService.aidl b/media/java/android/media/IAudioService.aidl
+old mode 100755
+new mode 100644
+index 4cf236a84eb0..ef0931c63757
+--- a/media/java/android/media/IAudioService.aidl
++++ b/media/java/android/media/IAudioService.aidl
+@@ -307,4 +307,10 @@ interface IAudioService {
+     // code via IAudioManager.h need to be added to the top section.
+ 
+     oneway void setMultiAudioFocusEnabled(in boolean enabled);
++
++    boolean setAdditionalOutputDeviceDelay(in AudioDeviceAttributes device, long delayMillis);
++
++    long getAdditionalOutputDeviceDelay(in AudioDeviceAttributes device);
++
++    long getMaxAdditionalOutputDeviceDelay(in AudioDeviceAttributes device);
+ }
+diff --git a/services/core/java/com/android/server/audio/AudioService.java b/services/core/java/com/android/server/audio/AudioService.java
+index 5c5987dfa8bf..319421b75779 100644
+--- a/services/core/java/com/android/server/audio/AudioService.java
++++ b/services/core/java/com/android/server/audio/AudioService.java
+@@ -32,6 +32,7 @@ import static com.android.server.audio.AudioEventLogger.Event.ALOGW;
+ 
+ import android.Manifest;
+ import android.annotation.IntDef;
++import android.annotation.IntRange;
+ import android.annotation.NonNull;
+ import android.annotation.Nullable;
+ import android.annotation.UserIdInt;
+@@ -166,6 +167,7 @@ import java.util.Collection;
+ import java.util.HashMap;
+ import java.util.HashSet;
+ import java.util.Iterator;
++import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
+ import java.util.NoSuchElementException;
+@@ -173,6 +175,8 @@ import java.util.Objects;
+ import java.util.Set;
+ import java.util.concurrent.Executor;
+ import java.util.concurrent.atomic.AtomicBoolean;
++import java.util.function.BooleanSupplier;
++import java.util.stream.Collectors;
+ 
+ /**
+  * The implementation of the audio service for volume, audio focus, device management...
+@@ -569,6 +573,117 @@ public class AudioService extends IAudioService.Stub
+ 
+     private boolean mDockAudioMediaEnabled = true;
+ 
++    /**
++     * RestorableParameters is a thread-safe class used to store a
++     * first-in first-out history of parameters for replay / restoration.
++     *
++     * The idealized implementation of restoration would have a list of setting methods and
++     * values to be called for restoration.  Explicitly managing such setters and
++     * values would be tedious - a simpler method is to store the values and the
++     * method implicitly by lambda capture (the values must be immutable or synchronization
++     * needs to be taken).
++     *
++     * We provide queueRestoreWithRemovalIfTrue() to allow
++     * the caller to provide a BooleanSupplier lambda, which conveniently packages
++     * the setter and its parameters needed for restoration.  If during restoration,
++     * the BooleanSupplier returns true, it is removed from the mMap.
++     *
++     * We provide a setParameters() method as an example helper method.
++     */
++    private static class RestorableParameters {
++        /**
++         * Sets a parameter and queues for restoration if successful.
++         *
++         * @param id a string handle associated with this parameter.
++         * @param parameter the actual parameter string.
++         * @return the result of AudioSystem.setParameters
++         */
++        public int setParameters(@NonNull String id, @NonNull String parameter) {
++            Objects.requireNonNull(id, "id must not be null");
++            Objects.requireNonNull(parameter, "parameter must not be null");
++            synchronized (mMap) {
++                final int status = AudioSystem.setParameters(parameter);
++                if (status == AudioSystem.AUDIO_STATUS_OK) { // Java uses recursive mutexes.
++                    queueRestoreWithRemovalIfTrue(id, () -> { // remove me if set fails.
++                        return AudioSystem.setParameters(parameter) != AudioSystem.AUDIO_STATUS_OK;
++                    });
++                }
++                // Implementation detail: We do not mMap.remove(id); on failure.
++                return status;
++            }
++        }
++
++        /**
++         * Queues a restore method which is executed on restoreAll().
++         *
++         * If the supplier null, the id is removed from the restore map.
++         *
++         * Note: When the BooleanSupplier restore method is executed
++         * during restoreAll, if it returns true, it is removed from the
++         * restore map.
++         *
++         * @param id a unique tag associated with the restore method.
++         * @param supplier is a BooleanSupplier lambda.
++         */
++        public void queueRestoreWithRemovalIfTrue(
++                @NonNull String id, @Nullable BooleanSupplier supplier) {
++            Objects.requireNonNull(id, "id must not be null");
++            synchronized (mMap) {
++                if (supplier != null) {
++                    mMap.put(id, supplier);
++                } else {
++                    mMap.remove(id);
++                }
++            }
++        }
++
++        /**
++         * Restore all parameters
++         *
++         * During restoration after audioserver death, any BooleanSupplier that returns
++         * true will be removed from mMap.
++         */
++        public void restoreAll() {
++            synchronized (mMap) {
++                // Note: removing from values() also removes from the backing map.
++                // TODO: Consider catching exceptions?
++                mMap.values().removeIf(v -> {
++                    return v.getAsBoolean();
++                });
++            }
++        }
++
++        /**
++         * mMap is a LinkedHashMap<Key, Value> of parameters restored by restore().
++         * The Key is a unique id tag for identification.
++         * The Value is a lambda expression which returns true if the entry is to
++         *     be removed.
++         *
++         * 1) For memory limitation purposes, mMap keeps the latest MAX_ENTRIES
++         *    accessed in the map.
++         * 2) Parameters are restored in order of queuing, first in first out,
++         *    from earliest to latest.
++         */
++        @GuardedBy("mMap")
++        private Map</* @NonNull */ String, /* @NonNull */ BooleanSupplier> mMap =
++                new LinkedHashMap<>() {
++            // TODO: do we need this memory limitation?
++            private static final int MAX_ENTRIES = 1000;  // limit our memory for now.
++            @Override
++            protected boolean removeEldestEntry(Map.Entry eldest) {
++                if (size() <= MAX_ENTRIES) return false;
++                Log.w(TAG, "Parameter map exceeds "
++                        + MAX_ENTRIES + " removing " + eldest.getKey()); // don't silently remove.
++                return true;
++            }
++        };
++    }
++
++    // We currently have one instance for mRestorableParameters used for
++    // setAdditionalOutputDeviceDelay().  Other methods requiring restoration could share this
++    // or use their own instance.
++    private RestorableParameters mRestorableParameters = new RestorableParameters();
++
+     private int mDockState = Intent.EXTRA_DOCK_STATE_UNDOCKED;
+ 
+     // Used when safe volume warning message display is requested by setStreamVolume(). In this
+@@ -1107,6 +1222,9 @@ public class AudioService extends IAudioService.Stub
+             RotationHelper.updateOrientation();
+         }
+ 
++        // Restore setParameters and other queued setters.
++        mRestorableParameters.restoreAll();
++
+         synchronized (mSettingsLock) {
+             final int forDock = mDockAudioMediaEnabled ?
+                     AudioSystem.FORCE_ANALOG_DOCK : AudioSystem.FORCE_NONE;
+@@ -9295,6 +9413,95 @@ public class AudioService extends IAudioService.Stub
+         }
+     }
+ 
++    /**
++     * @hide
++     * Sets an additional audio output device delay in milliseconds.
++     *
++     * The additional output delay is a request to the output device to
++     * delay audio presentation (generally with respect to video presentation for better
++     * synchronization).
++     * It may not be supported by all output devices,
++     * and typically increases the audio latency by the amount of additional
++     * audio delay requested.
++     *
++     * If additional audio delay is supported by an audio output device,
++     * it is expected to be supported for all output streams (and configurations)
++     * opened on that device.
++     *
++     * @param deviceType
++     * @param address
++     * @param delayMillis delay in milliseconds desired.  This should be in range of {@code 0}
++     *     to the value returned by {@link #getMaxAdditionalOutputDeviceDelay()}.
++     * @return true if successful, false if the device does not support output device delay
++     *     or the delay is not in range of {@link #getMaxAdditionalOutputDeviceDelay()}.
++     */
++    @Override
++    //@RequiresPermission(android.Manifest.permission.MODIFY_AUDIO_ROUTING)
++    public boolean setAdditionalOutputDeviceDelay(
++            @NonNull AudioDeviceAttributes device, @IntRange(from = 0) long delayMillis) {
++        Objects.requireNonNull(device, "device must not be null");
++        enforceModifyAudioRoutingPermission();
++        final String getterKey = "additional_output_device_delay="
++                 + AudioDeviceInfo.convertDeviceTypeToInternalDevice(device.getType())
++                 + "," + device.getAddress(); // "getter" key as an id.
++        final String setterKey = getterKey + "," + delayMillis;     // append the delay for setter
++        return mRestorableParameters.setParameters(getterKey, setterKey)
++                == AudioSystem.AUDIO_STATUS_OK;
++    }
++
++    /**
++     * @hide
++     * Returns the current additional audio output device delay in milliseconds.
++     *
++     * @param deviceType
++     * @param address
++     * @return the additional output device delay. This is a non-negative number.
++     *     {@code 0} is returned if unsupported.
++     */
++    @Override
++    @IntRange(from = 0)
++    public long getAdditionalOutputDeviceDelay(@NonNull AudioDeviceAttributes device) {
++        Objects.requireNonNull(device, "device must not be null");
++        final String key = "additional_output_device_delay";
++        final String reply = AudioSystem.getParameters(
++                key + "=" + AudioDeviceInfo.convertDeviceTypeToInternalDevice(device.getType())
++                    + "," + device.getAddress());
++        long delayMillis;
++        try {
++            delayMillis = Long.parseLong(reply.substring(key.length() + 1));
++        } catch (NullPointerException e) {
++            delayMillis = 0;
++        }
++        return delayMillis;
++    }
++
++    /**
++     * @hide
++     * Returns the maximum additional audio output device delay in milliseconds.
++     *
++     * @param deviceType
++     * @param address
++     * @return the maximum output device delay in milliseconds that can be set.
++     *     This is a non-negative number
++     *     representing the additional audio delay supported for the device.
++     *     {@code 0} is returned if unsupported.
++     */
++    @Override
++    @IntRange(from = 0)
++    public long getMaxAdditionalOutputDeviceDelay(@NonNull AudioDeviceAttributes device) {
++        Objects.requireNonNull(device, "device must not be null");
++        final String key = "max_additional_output_device_delay";
++        final String reply = AudioSystem.getParameters(
++                key + "=" + AudioDeviceInfo.convertDeviceTypeToInternalDevice(device.getType())
++                    + "," + device.getAddress());
++        long delayMillis;
++        try {
++            delayMillis = Long.parseLong(reply.substring(key.length() + 1));
++        } catch (NullPointerException e) {
++            delayMillis = 0;
++        }
++        return delayMillis;
++    }
+ 
+     //======================
+     // misc
+-- 
+2.29.0
+

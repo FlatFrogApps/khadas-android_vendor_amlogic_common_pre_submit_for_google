@@ -1,0 +1,32 @@
+From 7328f55225991d18c65cc2c8bc01726fd58167c5 Mon Sep 17 00:00:00 2001
+From: Kuowei Li <kuowei.li@mediatek.com>
+Date: Mon, 10 Aug 2020 10:40:57 +0800
+Subject: [PATCH] audio: add AdditionalOutputDeviceDelay parameter define
+
+Test: TIS player with instrumented HAL
+Test: atest AudioManagerTest#testGetAdditionalOutputDeviceDelay
+Bug: 173482792
+Merged-In: I1d6fdc7f25fb3d4f3caa8ed38fc12666fefb1a5f
+Change-Id: I1d6fdc7f25fb3d4f3caa8ed38fc12666fefb1a5f
+---
+ audio/include/system/audio.h | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/audio/include/system/audio.h b/audio/include/system/audio.h
+index 189f51b9..3fffa276 100644
+--- a/audio/include/system/audio.h
++++ b/audio/include/system/audio.h
+@@ -1690,6 +1690,10 @@ __END_DECLS
+ #define AUDIO_PARAMETER_DEVICE_SUP_ENCAPSULATION_MODES "supEncapsulationModes"
+ #define AUDIO_PARAMETER_DEVICE_SUP_ENCAPSULATION_METADATA_TYPES "supEncapsulationMetadataTypes"
+ 
++/* Query additional delay in millisecond on each output device. */
++#define AUDIO_PARAMETER_DEVICE_ADDITIONAL_OUTPUT_DELAY "additional_output_device_delay"
++#define AUDIO_PARAMETER_DEVICE_MAX_ADDITIONAL_OUTPUT_DELAY "max_additional_output_device_delay"
++
+ /**
+  * audio codec parameters
+  */
+-- 
+2.29.0
+

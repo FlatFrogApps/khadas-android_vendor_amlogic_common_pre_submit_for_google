@@ -1,0 +1,975 @@
+From cac3f8706af4b508ce88fbea1685a81ff32ac1b2 Mon Sep 17 00:00:00 2001
+From: Kuowei Li <kuowei.li@mediatek.com>
+Date: Thu, 13 Aug 2020 14:44:25 +0800
+Subject: [PATCH] audio: add implementation for TV related API
+
+1. TunerConfiguration.
+2. AudioDescriptionMixLevel getter/setter.
+3. DualMonoMode getter/setter.
+4. PlaybackRate getter/setter.
+
+Test: TIS player with instrumented HAL
+Test: atest AudioTrackTest#testTunerConfiguration
+Test: atest AudioTrackTest#testDualMonoMode
+Test: atest AudioTrackTest#testAudioDescriptionMixLevel
+Test: atest AudioManagerTest#testGetAdditionalOutputDeviceDelay
+Bug: 173482792
+Merged-In: Idb22ce6714fa240b2b4b3b8637b16d3a51228fa1
+Change-Id: Idb22ce6714fa240b2b4b3b8637b16d3a51228fa1
+---
+ media/libaudioclient/AudioTrack.cpp           |  56 ++++-
+ media/libaudioclient/IAudioTrack.cpp          | 145 +++++++++++++
+ .../libaudioclient/include/media/AudioTrack.h |  24 ++-
+ .../include/media/IAudioTrack.h               |  19 ++
+ .../libaudiohal/impl/ConversionHelperHidl.cpp |  10 +-
+ media/libaudiohal/impl/StreamHalHidl.cpp      |  93 +++++++++
+ media/libaudiohal/impl/StreamHalHidl.h        |  18 ++
+ media/libaudiohal/impl/StreamHalLocal.cpp     |  30 +++
+ media/libaudiohal/impl/StreamHalLocal.h       |  18 ++
+ .../media/audiohal/StreamHalInterface.h       |  19 ++
+ media/libmediahelper/AudioParameter.cpp       |   4 +
+ .../include/media/AudioParameter.h            |   3 +
+ services/audioflinger/AudioFlinger.h          |   7 +
+ services/audioflinger/PlaybackTracks.h        |  10 +
+ services/audioflinger/Tracks.cpp              | 191 +++++++++++++++++-
+ .../src/AudioOutputDescriptor.cpp             |   3 +
+ 16 files changed, 645 insertions(+), 5 deletions(-)
+
+diff --git a/media/libaudioclient/AudioTrack.cpp b/media/libaudioclient/AudioTrack.cpp
+index 68d11d45ca..2019cca061 100644
+--- a/media/libaudioclient/AudioTrack.cpp
++++ b/media/libaudioclient/AudioTrack.cpp
+@@ -1045,6 +1045,40 @@ uint32_t AudioTrack::getOriginalSampleRate() const
+     return mOriginalSampleRate;
+ }
+ 
++status_t AudioTrack::setDualMonoMode(audio_dual_mono_mode_t mode)
++{
++    AutoMutex lock(mLock);
++    return setDualMonoMode_l(mode);
++}
++
++status_t AudioTrack::setDualMonoMode_l(audio_dual_mono_mode_t mode)
++{
++    return mAudioTrack->setDualMonoMode(mode);
++}
++
++status_t AudioTrack::getDualMonoMode(audio_dual_mono_mode_t* mode) const
++{
++    AutoMutex lock(mLock);
++    return mAudioTrack->getDualMonoMode(mode);
++}
++
++status_t AudioTrack::setAudioDescriptionMixLevel(float leveldB)
++{
++    AutoMutex lock(mLock);
++    return setAudioDescriptionMixLevel_l(leveldB);
++}
++
++status_t AudioTrack::setAudioDescriptionMixLevel_l(float leveldB)
++{
++    return mAudioTrack->setAudioDescriptionMixLevel(leveldB);
++}
++
++status_t AudioTrack::getAudioDescriptionMixLevel(float* leveldB) const
++{
++    AutoMutex lock(mLock);
++    return mAudioTrack->getAudioDescriptionMixLevel(leveldB);
++}
++
+ status_t AudioTrack::setPlaybackRate(const AudioPlaybackRate &playbackRate)
+ {
+     AutoMutex lock(mLock);
+@@ -1052,7 +1086,11 @@ status_t AudioTrack::setPlaybackRate(const AudioPlaybackRate &playbackRate)
+         return NO_ERROR;
+     }
+     if (isOffloadedOrDirect_l()) {
+-        return INVALID_OPERATION;
++        status_t status = mAudioTrack->setPlaybackRateParameters(playbackRate);
++        if (status == NO_ERROR) {
++            mPlaybackRate = playbackRate;
++        }
++        return status;
+     }
+     if (mFlags & AUDIO_OUTPUT_FLAG_FAST) {
+         return INVALID_OPERATION;
+@@ -1117,9 +1155,16 @@ status_t AudioTrack::setPlaybackRate(const AudioPlaybackRate &playbackRate)
+     return NO_ERROR;
+ }
+ 
+-const AudioPlaybackRate& AudioTrack::getPlaybackRate() const
++const AudioPlaybackRate& AudioTrack::getPlaybackRate()
+ {
+     AutoMutex lock(mLock);
++    if (isOffloadedOrDirect_l()) {
++        audio_playback_rate_t playbackRateTemp;
++        const status_t status = mAudioTrack->getPlaybackRateParameters(&playbackRateTemp);
++        if (status == NO_ERROR) { // update local version if changed.
++            mPlaybackRate = playbackRateTemp;
++        }
++    }
+     return mPlaybackRate;
+ }
+ 
+@@ -1715,6 +1760,13 @@ status_t AudioTrack::createTrack_l()
+     mProxy->setPlaybackRate(playbackRateTemp);
+     mProxy->setMinimum(mNotificationFramesAct);
+ 
++    if (mDualMonoMode != AUDIO_DUAL_MONO_MODE_OFF) {
++        setDualMonoMode_l(mDualMonoMode);
++    }
++    if (mAudioDescriptionMixLeveldB != -std::numeric_limits<float>::infinity()) {
++        setAudioDescriptionMixLevel_l(mAudioDescriptionMixLeveldB);
++    }
++
+     mDeathNotifier = new DeathNotifier(this);
+     IInterface::asBinder(mAudioTrack)->linkToDeath(mDeathNotifier, this);
+ 
+diff --git a/media/libaudioclient/IAudioTrack.cpp b/media/libaudioclient/IAudioTrack.cpp
+index 6219e7a4ba..6fcf300247 100644
+--- a/media/libaudioclient/IAudioTrack.cpp
++++ b/media/libaudioclient/IAudioTrack.cpp
+@@ -44,6 +44,12 @@ enum {
+     SIGNAL,
+     APPLY_VOLUME_SHAPER,
+     GET_VOLUME_SHAPER_STATE,
++    SET_DUAL_MONO_MODE,
++    GET_DUAL_MONO_MODE,
++    SET_AUDIO_DESCRIPTION_MIX_LEVEL,
++    GET_AUDIO_DESCRIPTION_MIX_LEVEL,
++    SET_PLAYBACK_RATE_PARAMETERS,
++    GET_PLAYBACK_RATE_PARAMETERS,
+ };
+ 
+ class BpAudioTrack : public BpInterface<IAudioTrack>
+@@ -207,6 +213,92 @@ public:
+         }
+         return state;
+     }
++
++    status_t getDualMonoMode(audio_dual_mono_mode_t* mode) override {
++        Parcel data, reply;
++        data.writeInterfaceToken(IAudioTrack::getInterfaceDescriptor());
++        status_t status = remote()->transact(GET_DUAL_MONO_MODE, data, &reply);
++        if (status != NO_ERROR) {
++            return status;
++        }
++        status = (status_t)reply.readInt32();
++        if (status != NO_ERROR) {
++            return status;
++        }
++        *mode = (audio_dual_mono_mode_t)reply.readInt32();
++        return NO_ERROR;
++    }
++
++    status_t setDualMonoMode(audio_dual_mono_mode_t mode) override {
++        Parcel data, reply;
++        data.writeInterfaceToken(IAudioTrack::getInterfaceDescriptor());
++        data.writeInt32((int32_t)mode);
++        status_t status = remote()->transact(SET_DUAL_MONO_MODE, data, &reply);
++        if (status != NO_ERROR) {
++            return status;
++        }
++        return reply.readInt32();
++    }
++
++    status_t getAudioDescriptionMixLevel(float* leveldB) override {
++        Parcel data, reply;
++        data.writeInterfaceToken(IAudioTrack::getInterfaceDescriptor());
++        status_t status = remote()->transact(GET_AUDIO_DESCRIPTION_MIX_LEVEL, data, &reply);
++        if (status != NO_ERROR) {
++            return status;
++        }
++        status = (status_t)reply.readInt32();
++        if (status != NO_ERROR) {
++            return status;
++        }
++        *leveldB = reply.readFloat();
++        return NO_ERROR;
++    }
++
++    status_t setAudioDescriptionMixLevel(float leveldB) override {
++        Parcel data, reply;
++        data.writeInterfaceToken(IAudioTrack::getInterfaceDescriptor());
++        data.writeFloat(leveldB);
++        status_t status = remote()->transact(SET_AUDIO_DESCRIPTION_MIX_LEVEL, data, &reply);
++        if (status != NO_ERROR) {
++            return status;
++        }
++        return reply.readInt32();
++    }
++
++    status_t getPlaybackRateParameters(audio_playback_rate_t* playbackRate) override {
++        Parcel data, reply;
++        data.writeInterfaceToken(IAudioTrack::getInterfaceDescriptor());
++        status_t status = remote()->transact(GET_PLAYBACK_RATE_PARAMETERS, data, &reply);
++        if (status != NO_ERROR) {
++            return status;
++        }
++        status = (status_t)reply.readInt32();
++        if (status != NO_ERROR) {
++            return status;
++        }
++        playbackRate->mSpeed = reply.readFloat();
++        playbackRate->mPitch = reply.readFloat();
++        playbackRate->mStretchMode =
++            static_cast<audio_timestretch_stretch_mode_t>(reply.readInt32());
++        playbackRate->mFallbackMode =
++            static_cast<audio_timestretch_fallback_mode_t>(reply.readInt32());
++        return NO_ERROR;
++    }
++
++    status_t setPlaybackRateParameters(const audio_playback_rate_t& playbackRate) override {
++        Parcel data, reply;
++        data.writeInterfaceToken(IAudioTrack::getInterfaceDescriptor());
++        data.writeFloat(playbackRate.mSpeed);
++        data.writeFloat(playbackRate.mPitch);
++        data.writeInt32(playbackRate.mStretchMode);
++        data.writeInt32(playbackRate.mFallbackMode);
++        status_t status = remote()->transact(SET_PLAYBACK_RATE_PARAMETERS, data, &reply);
++        if (status != NO_ERROR) {
++            return status;
++        }
++        return reply.readInt32();
++    }
+ };
+ 
+ IMPLEMENT_META_INTERFACE(AudioTrack, "android.media.IAudioTrack");
+@@ -309,6 +401,59 @@ status_t BnAudioTrack::onTransact(
+             }
+             return NO_ERROR;
+         } break;
++        case SET_DUAL_MONO_MODE: {
++            CHECK_INTERFACE(IAudioTrack, data, reply);
++            reply->writeInt32( setDualMonoMode((audio_dual_mono_mode_t)data.readInt32()) );
++            return NO_ERROR;
++        } break;
++        case GET_DUAL_MONO_MODE: {
++            CHECK_INTERFACE(IAudioTrack, data, reply);
++            audio_dual_mono_mode_t mode;
++            const status_t status = getDualMonoMode(&mode);
++            reply->writeInt32((int32_t)status);
++            if (status == NO_ERROR) {
++                reply->writeInt32(mode);
++            }
++            return NO_ERROR;
++        } break;
++        case SET_AUDIO_DESCRIPTION_MIX_LEVEL: {
++            CHECK_INTERFACE(IAudioTrack, data, reply);
++            reply->writeInt32( setAudioDescriptionMixLevel(data.readFloat()) );
++            return NO_ERROR;
++        } break;
++        case GET_AUDIO_DESCRIPTION_MIX_LEVEL: {
++            CHECK_INTERFACE(IAudioTrack, data, reply);
++            float f;
++            const status_t status = getAudioDescriptionMixLevel(&f);
++            reply->writeInt32((int32_t)status);
++            if (status == NO_ERROR) {
++                reply->writeFloat(f);
++            }
++            return NO_ERROR;
++        } break;
++        case SET_PLAYBACK_RATE_PARAMETERS: {
++            CHECK_INTERFACE(IAudioTrack, data, reply);
++            audio_playback_rate_t playbackRate = {
++                data.readFloat(),
++                data.readFloat(),
++                static_cast<audio_timestretch_stretch_mode_t>(data.readInt32()),
++                static_cast<audio_timestretch_fallback_mode_t>(data.readInt32())};
++            reply->writeInt32( setPlaybackRateParameters(playbackRate) );
++            return NO_ERROR;
++        } break;
++        case GET_PLAYBACK_RATE_PARAMETERS: {
++            CHECK_INTERFACE(IAudioTrack, data, reply);
++            audio_playback_rate_t playbackRate;
++            const status_t status = getPlaybackRateParameters(&playbackRate);
++            reply->writeInt32((int32_t)status);
++            if (status == NO_ERROR) {
++                reply->writeFloat(playbackRate.mSpeed);
++                reply->writeFloat(playbackRate.mPitch);
++                reply->writeInt32(playbackRate.mStretchMode);
++                reply->writeInt32(playbackRate.mFallbackMode);
++            }
++            return NO_ERROR;
++        } break;
+         default:
+             return BBinder::onTransact(code, data, reply, flags);
+     }
+diff --git a/media/libaudioclient/include/media/AudioTrack.h b/media/libaudioclient/include/media/AudioTrack.h
+index a9946da78c..19b9971d47 100644
+--- a/media/libaudioclient/include/media/AudioTrack.h
++++ b/media/libaudioclient/include/media/AudioTrack.h
+@@ -492,6 +492,18 @@ public:
+      */
+             uint32_t    getOriginalSampleRate() const;
+ 
++    /* Sets the Dual Mono mode presentation on the output device. */
++            status_t    setDualMonoMode(audio_dual_mono_mode_t mode);
++
++    /* Returns the Dual Mono mode presentation setting. */
++            status_t    getDualMonoMode(audio_dual_mono_mode_t* mode) const;
++
++    /* Sets the Audio Description Mix level in dB. */
++            status_t    setAudioDescriptionMixLevel(float leveldB);
++
++    /* Returns the Audio Description Mix level in dB. */
++            status_t    getAudioDescriptionMixLevel(float* leveldB) const;
++
+     /* Set source playback rate for timestretch
+      * 1.0 is normal speed: < 1.0 is slower, > 1.0 is faster
+      * 1.0 is normal pitch: < 1.0 is lower pitch, > 1.0 is higher pitch
+@@ -505,7 +517,7 @@ public:
+             status_t    setPlaybackRate(const AudioPlaybackRate &playbackRate);
+ 
+     /* Return current playback rate */
+-            const AudioPlaybackRate& getPlaybackRate() const;
++            const AudioPlaybackRate& getPlaybackRate();
+ 
+     /* Enables looping and sets the start and end points of looping.
+      * Only supported for static buffer mode.
+@@ -1049,6 +1061,12 @@ public:
+ 
+             void     updateRoutedDeviceId_l();
+ 
++            /* Sets the Dual Mono mode presentation on the output device. */
++            status_t setDualMonoMode_l(audio_dual_mono_mode_t mode);
++
++            /* Sets the Audio Description Mix level in dB. */
++            status_t setAudioDescriptionMixLevel_l(float leveldB);
++
+     // Next 4 fields may be changed if IAudioTrack is re-created, but always != 0
+     sp<IAudioTrack>         mAudioTrack;
+     sp<IMemory>             mCblkMemory;
+@@ -1261,6 +1279,10 @@ private:
+ 
+     wp<AudioSystem::AudioDeviceCallback> mDeviceCallback;
+ 
++    // Cached values to restore along with the AudioTrack.
++    audio_dual_mono_mode_t mDualMonoMode = AUDIO_DUAL_MONO_MODE_OFF;
++    float mAudioDescriptionMixLeveldB = -std::numeric_limits<float>::infinity();
++
+ private:
+     class MediaMetrics {
+       public:
+diff --git a/media/libaudioclient/include/media/IAudioTrack.h b/media/libaudioclient/include/media/IAudioTrack.h
+index 06e786d294..dbbbf35c29 100644
+--- a/media/libaudioclient/include/media/IAudioTrack.h
++++ b/media/libaudioclient/include/media/IAudioTrack.h
+@@ -27,6 +27,7 @@
+ #include <utils/String8.h>
+ #include <media/AudioTimestamp.h>
+ #include <media/VolumeShaper.h>
++#include <system/audio.h>
+ 
+ namespace android {
+ 
+@@ -86,6 +87,24 @@ public:
+ 
+     /* gets the volume shaper state */
+     virtual sp<media::VolumeShaper::State> getVolumeShaperState(int id) = 0;
++
++    /* Returns the Dual Mono mode presentation setting. */
++    virtual status_t    getDualMonoMode(audio_dual_mono_mode_t* mode) = 0;
++
++    /* Sets the Dual Mono mode presentation on the output device. */
++    virtual status_t    setDualMonoMode(audio_dual_mono_mode_t mode) = 0;
++
++    /* Returns the Audio Description Mix level in dB. */
++    virtual status_t    getAudioDescriptionMixLevel(float* leveldB) = 0;
++
++    /* Sets the Audio Description Mix level in dB. */
++    virtual status_t    setAudioDescriptionMixLevel(float leveldB) = 0;
++
++    /* Retrieves current playback rate parameters. */
++    virtual status_t    getPlaybackRateParameters(audio_playback_rate_t* playbackRate) = 0;
++
++    /* Sets the playback rate parameters that control playback behavior. */
++    virtual status_t    setPlaybackRateParameters(const audio_playback_rate_t& playbackRate) = 0;
+ };
+ 
+ // ----------------------------------------------------------------------------
+diff --git a/media/libaudiohal/impl/ConversionHelperHidl.cpp b/media/libaudiohal/impl/ConversionHelperHidl.cpp
+index ebed5fd9f2..cf07a47f1e 100644
+--- a/media/libaudiohal/impl/ConversionHelperHidl.cpp
++++ b/media/libaudiohal/impl/ConversionHelperHidl.cpp
+@@ -50,12 +50,20 @@ status_t ConversionHelperHidl::keysFromHal(const String8& keys, hidl_vec<hidl_st
+             halKeys.get(String8(AUDIO_PARAMETER_DEVICE_SUP_ENCAPSULATION_METADATA_TYPES),
+                         value) == NO_ERROR;
+ 
++    const bool keepDelayValue =
++            halKeys.get(String8(AUDIO_PARAMETER_DEVICE_ADDITIONAL_OUTPUT_DELAY),
++                        value) == NO_ERROR ||
++            halKeys.get(String8(AUDIO_PARAMETER_DEVICE_MAX_ADDITIONAL_OUTPUT_DELAY),
++                        value) == NO_ERROR;
++
+     for (size_t i = 0; i < halKeys.size(); ++i) {
+         String8 key;
+         status_t status = halKeys.getAt(i, key);
+         if (status != OK) return status;
+         if ((keepFormatValue && key == AudioParameter::keyFormat) ||
+-            (keepRoutingValue && key == AudioParameter::keyRouting)) {
++            (keepRoutingValue && key == AudioParameter::keyRouting) ||
++            (keepDelayValue && key == AUDIO_PARAMETER_DEVICE_ADDITIONAL_OUTPUT_DELAY) ||
++            (keepDelayValue && key == AUDIO_PARAMETER_DEVICE_MAX_ADDITIONAL_OUTPUT_DELAY)) {
+             AudioParameter keepValueParam;
+             halKeys.getAt(i, key, value);
+             keepValueParam.add(key, value);
+diff --git a/media/libaudiohal/impl/StreamHalHidl.cpp b/media/libaudiohal/impl/StreamHalHidl.cpp
+index 2726e36a79..0abea70dff 100644
+--- a/media/libaudiohal/impl/StreamHalHidl.cpp
++++ b/media/libaudiohal/impl/StreamHalHidl.cpp
+@@ -622,6 +622,32 @@ status_t StreamOutHalHidl::updateSourceMetadata(
+ #endif
+ 
+ #if MAJOR_VERSION < 6
++status_t StreamOutHalHidl::getDualMonoMode(audio_dual_mono_mode_t* mode __unused) {
++    return INVALID_OPERATION;
++}
++
++status_t StreamOutHalHidl::setDualMonoMode(audio_dual_mono_mode_t mode __unused) {
++    return INVALID_OPERATION;
++}
++
++status_t StreamOutHalHidl::getAudioDescriptionMixLevel(float* leveldB __unused) {
++    return INVALID_OPERATION;
++}
++
++status_t StreamOutHalHidl::setAudioDescriptionMixLevel(float leveldB __unused) {
++    return INVALID_OPERATION;
++}
++
++status_t StreamOutHalHidl::getPlaybackRateParameters(
++        audio_playback_rate_t* playbackRate __unused) {
++    return INVALID_OPERATION;
++}
++
++status_t StreamOutHalHidl::setPlaybackRateParameters(
++        const audio_playback_rate_t& playbackRate __unused) {
++    return INVALID_OPERATION;
++}
++
+ status_t StreamOutHalHidl::setEventCallback(
+         const sp<StreamOutHalInterfaceEventCallback>& callback __unused) {
+     // Codec format callback is supported starting from audio HAL V6.0
+@@ -629,6 +655,73 @@ status_t StreamOutHalHidl::setEventCallback(
+ }
+ #else
+ 
++status_t StreamOutHalHidl::getDualMonoMode(audio_dual_mono_mode_t* mode) {
++    if (mStream == 0) return NO_INIT;
++    Result retval;
++    Return<void> ret = mStream->getDualMonoMode(
++            [&](Result r, DualMonoMode hidlMode) {
++                retval = r;
++                if (retval == Result::OK) {
++                    *mode = static_cast<audio_dual_mono_mode_t>(hidlMode);
++                }
++            });
++    return processReturn("getDualMonoMode", ret, retval);
++}
++
++status_t StreamOutHalHidl::setDualMonoMode(audio_dual_mono_mode_t mode) {
++    if (mStream == 0) return NO_INIT;
++    return processReturn(
++            "setDualMonoMode", mStream->setDualMonoMode(static_cast<DualMonoMode>(mode)));
++}
++
++status_t StreamOutHalHidl::getAudioDescriptionMixLevel(float* leveldB) {
++    if (mStream == 0) return NO_INIT;
++    Result retval;
++    Return<void> ret = mStream->getAudioDescriptionMixLevel(
++            [&](Result r, float hidlLeveldB) {
++                retval = r;
++                if (retval == Result::OK) {
++                    *leveldB = hidlLeveldB;
++                }
++            });
++    return processReturn("getAudioDescriptionMixLevel", ret, retval);
++}
++
++status_t StreamOutHalHidl::setAudioDescriptionMixLevel(float leveldB) {
++    if (mStream == 0) return NO_INIT;
++    return processReturn(
++            "setAudioDescriptionMixLevel", mStream->setAudioDescriptionMixLevel(leveldB));
++}
++
++status_t StreamOutHalHidl::getPlaybackRateParameters(audio_playback_rate_t* playbackRate) {
++    if (mStream == 0) return NO_INIT;
++    Result retval;
++    Return<void> ret = mStream->getPlaybackRateParameters(
++            [&](Result r, PlaybackRate hidlPlaybackRate) {
++                retval = r;
++                if (retval == Result::OK) {
++                    playbackRate->mSpeed = hidlPlaybackRate.speed;
++                    playbackRate->mPitch = hidlPlaybackRate.pitch;
++                    playbackRate->mStretchMode =
++                        static_cast<audio_timestretch_stretch_mode_t>(
++                            hidlPlaybackRate.timestretchMode);
++                    playbackRate->mFallbackMode =
++                        static_cast<audio_timestretch_fallback_mode_t>(
++                            hidlPlaybackRate.fallbackMode);
++                }
++            });
++    return processReturn("getPlaybackRateParameters", ret, retval);
++}
++
++status_t StreamOutHalHidl::setPlaybackRateParameters(const audio_playback_rate_t& playbackRate) {
++    if (mStream == 0) return NO_INIT;
++    return processReturn(
++            "setPlaybackRateParameters", mStream->setPlaybackRateParameters(
++                PlaybackRate{playbackRate.mSpeed, playbackRate.mPitch,
++                    static_cast<TimestretchMode>(playbackRate.mStretchMode),
++                    static_cast<TimestretchFallbackMode>(playbackRate.mFallbackMode)}));
++}
++
+ #include PATH(android/hardware/audio/FILE_VERSION/IStreamOutEventCallback.h)
+ 
+ namespace {
+diff --git a/media/libaudiohal/impl/StreamHalHidl.h b/media/libaudiohal/impl/StreamHalHidl.h
+index 88f85873b1..2db4973b07 100644
+--- a/media/libaudiohal/impl/StreamHalHidl.h
++++ b/media/libaudiohal/impl/StreamHalHidl.h
+@@ -173,6 +173,24 @@ class StreamOutHalHidl : public StreamOutHalInterface, public StreamHalHidl {
+     void onDrainReady();
+     void onError();
+ 
++    // Returns the Dual Mono mode presentation setting.
++    status_t getDualMonoMode(audio_dual_mono_mode_t* mode) override;
++
++    // Sets the Dual Mono mode presentation on the output device.
++    status_t setDualMonoMode(audio_dual_mono_mode_t mode) override;
++
++    // Returns the Audio Description Mix level in dB.
++    status_t getAudioDescriptionMixLevel(float* leveldB) override;
++
++    // Sets the Audio Description Mix level in dB.
++    status_t setAudioDescriptionMixLevel(float leveldB) override;
++
++    // Retrieves current playback rate parameters.
++    status_t getPlaybackRateParameters(audio_playback_rate_t* playbackRate) override;
++
++    // Sets the playback rate parameters that control playback behavior.
++    status_t setPlaybackRateParameters(const audio_playback_rate_t& playbackRate) override;
++
+     status_t setEventCallback(const sp<StreamOutHalInterfaceEventCallback>& callback) override;
+ 
+     // Methods used by StreamCodecFormatCallback (HIDL).
+diff --git a/media/libaudiohal/impl/StreamHalLocal.cpp b/media/libaudiohal/impl/StreamHalLocal.cpp
+index 69be30314e..dc67b97a64 100644
+--- a/media/libaudiohal/impl/StreamHalLocal.cpp
++++ b/media/libaudiohal/impl/StreamHalLocal.cpp
+@@ -275,6 +275,36 @@ status_t StreamOutHalLocal::getMmapPosition(struct audio_mmap_position *position
+     return mStream->get_mmap_position(mStream, position);
+ }
+ 
++status_t StreamOutHalLocal::getDualMonoMode(audio_dual_mono_mode_t* mode) {
++    if (mStream->get_dual_mono_mode == nullptr) return INVALID_OPERATION;
++    return mStream->get_dual_mono_mode(mStream, mode);
++}
++
++status_t StreamOutHalLocal::setDualMonoMode(audio_dual_mono_mode_t mode) {
++    if (mStream->set_dual_mono_mode == nullptr) return INVALID_OPERATION;
++    return mStream->set_dual_mono_mode(mStream, mode);
++}
++
++status_t StreamOutHalLocal::getAudioDescriptionMixLevel(float* leveldB) {
++    if (mStream->get_audio_description_mix_level == nullptr) return INVALID_OPERATION;
++    return mStream->get_audio_description_mix_level(mStream, leveldB);
++}
++
++status_t StreamOutHalLocal::setAudioDescriptionMixLevel(float leveldB) {
++    if (mStream->set_audio_description_mix_level == nullptr) return INVALID_OPERATION;
++    return mStream->set_audio_description_mix_level(mStream, leveldB);
++}
++
++status_t StreamOutHalLocal::getPlaybackRateParameters(audio_playback_rate_t* playbackRate) {
++    if (mStream->get_playback_rate_parameters == nullptr) return INVALID_OPERATION;
++    return mStream->get_playback_rate_parameters(mStream, playbackRate);
++}
++
++status_t StreamOutHalLocal::setPlaybackRateParameters(const audio_playback_rate_t& playbackRate) {
++    if (mStream->set_playback_rate_parameters == nullptr) return INVALID_OPERATION;
++    return mStream->set_playback_rate_parameters(mStream, &playbackRate);
++}
++
+ status_t StreamOutHalLocal::setEventCallback(
+         const sp<StreamOutHalInterfaceEventCallback>& callback) {
+     if (mStream->set_event_callback == nullptr) {
+diff --git a/media/libaudiohal/impl/StreamHalLocal.h b/media/libaudiohal/impl/StreamHalLocal.h
+index d17f9f3dc2..c032ae62a8 100644
+--- a/media/libaudiohal/impl/StreamHalLocal.h
++++ b/media/libaudiohal/impl/StreamHalLocal.h
+@@ -156,6 +156,24 @@ class StreamOutHalLocal : public StreamOutHalInterface, public StreamHalLocal {
+     // Called when the metadata of the stream's source has been changed.
+     status_t updateSourceMetadata(const SourceMetadata& sourceMetadata) override;
+ 
++    // Returns the Dual Mono mode presentation setting.
++    status_t getDualMonoMode(audio_dual_mono_mode_t* mode) override;
++
++    // Sets the Dual Mono mode presentation on the output device.
++    status_t setDualMonoMode(audio_dual_mono_mode_t mode) override;
++
++    // Returns the Audio Description Mix level in dB.
++    status_t getAudioDescriptionMixLevel(float* leveldB) override;
++
++    // Sets the Audio Description Mix level in dB.
++    status_t setAudioDescriptionMixLevel(float leveldB) override;
++
++    // Retrieves current playback rate parameters.
++    status_t getPlaybackRateParameters(audio_playback_rate_t* playbackRate) override;
++
++    // Sets the playback rate parameters that control playback behavior.
++    status_t setPlaybackRateParameters(const audio_playback_rate_t& playbackRate) override;
++
+     status_t setEventCallback(const sp<StreamOutHalInterfaceEventCallback>& callback) override;
+ 
+   private:
+diff --git a/media/libaudiohal/include/media/audiohal/StreamHalInterface.h b/media/libaudiohal/include/media/audiohal/StreamHalInterface.h
+index e30cb72441..545cc1f9cd 100644
+--- a/media/libaudiohal/include/media/audiohal/StreamHalInterface.h
++++ b/media/libaudiohal/include/media/audiohal/StreamHalInterface.h
+@@ -160,12 +160,31 @@ class StreamOutHalInterface : public virtual StreamHalInterface {
+     struct SourceMetadata {
+         std::vector<playback_track_metadata_t> tracks;
+     };
++
+     /**
+      * Called when the metadata of the stream's source has been changed.
+      * @param sourceMetadata Description of the audio that is played by the clients.
+      */
+     virtual status_t updateSourceMetadata(const SourceMetadata& sourceMetadata) = 0;
+ 
++    // Returns the Dual Mono mode presentation setting.
++    virtual status_t getDualMonoMode(audio_dual_mono_mode_t* mode) = 0;
++
++    // Sets the Dual Mono mode presentation on the output device.
++    virtual status_t setDualMonoMode(audio_dual_mono_mode_t mode) = 0;
++
++    // Returns the Audio Description Mix level in dB.
++    virtual status_t getAudioDescriptionMixLevel(float* leveldB) = 0;
++
++    // Sets the Audio Description Mix level in dB.
++    virtual status_t setAudioDescriptionMixLevel(float leveldB) = 0;
++
++    // Retrieves current playback rate parameters.
++    virtual status_t getPlaybackRateParameters(audio_playback_rate_t* playbackRate) = 0;
++
++    // Sets the playback rate parameters that control playback behavior.
++    virtual status_t setPlaybackRateParameters(const audio_playback_rate_t& playbackRate) = 0;
++
+     virtual status_t setEventCallback(const sp<StreamOutHalInterfaceEventCallback>& callback) = 0;
+ 
+   protected:
+diff --git a/media/libmediahelper/AudioParameter.cpp b/media/libmediahelper/AudioParameter.cpp
+index fc8306c545..73c1e4117b 100644
+--- a/media/libmediahelper/AudioParameter.cpp
++++ b/media/libmediahelper/AudioParameter.cpp
+@@ -57,6 +57,10 @@ const char * const AudioParameter::keyReconfigA2dpSupported = AUDIO_PARAMETER_A2
+ //        AUDIO_PARAMETER_DEVICE_SUP_ENCAPSULATION_MODES;
+ // const char * const AudioParameter::keyDeviceSupportedEncapsulationMetadataTypes =
+ //        AUDIO_PARAMETER_DEVICE_SUP_ENCAPSULATION_METADATA_TYPES;
++// const char * const AudioParameter::keyAdditionalOutputDeviceDelay =
++//        AUDIO_PARAMETER_DEVICE_ADDITIONAL_OUTPUT_DELAY;
++// const char * const AudioParameter::keyMaxAdditionalOutputDeviceDelay =
++//        AUDIO_PARAMETER_DEVICE_MAX_ADDITIONAL_OUTPUT_DELAY;
+ 
+ AudioParameter::AudioParameter(const String8& keyValuePairs)
+ {
+diff --git a/media/libmediahelper/include/media/AudioParameter.h b/media/libmediahelper/include/media/AudioParameter.h
+index 66d8dfb8d4..b72d0d5b87 100644
+--- a/media/libmediahelper/include/media/AudioParameter.h
++++ b/media/libmediahelper/include/media/AudioParameter.h
+@@ -104,6 +104,9 @@ public:
+     // static const char * const keyDeviceSupportedEncapsulationModes;
+     // static const char * const keyDeviceSupportedEncapsulationMetadataTypes;
+ 
++    // static const char * const keyAdditionalOutputDeviceDelay;
++    // static const char * const keyMaxAdditionalOutputDeviceDelay;
++
+     String8 toString() const { return toStringImpl(true); }
+     String8 keysToString() const { return toStringImpl(false); }
+ 
+diff --git a/services/audioflinger/AudioFlinger.h b/services/audioflinger/AudioFlinger.h
+index 20f561e8ba..8b47bea53c 100644
+--- a/services/audioflinger/AudioFlinger.h
++++ b/services/audioflinger/AudioFlinger.h
+@@ -642,6 +642,13 @@ using effect_buffer_t = int16_t;
+         virtual sp<media::VolumeShaper::State> getVolumeShaperState(int id) override;
+         virtual status_t    getTimestamp(AudioTimestamp& timestamp);
+         virtual void        signal(); // signal playback thread for a change in control block
++                status_t    getDualMonoMode(audio_dual_mono_mode_t* mode) override;
++                status_t    setDualMonoMode(audio_dual_mono_mode_t mode) override;
++                status_t    getAudioDescriptionMixLevel(float* leveldB) override;
++                status_t    setAudioDescriptionMixLevel(float leveldB) override;
++                status_t    getPlaybackRateParameters(audio_playback_rate_t* playbackRate) override;
++                status_t    setPlaybackRateParameters(
++                        const audio_playback_rate_t& playbackRate) override;
+ 
+         virtual status_t onTransact(
+             uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags);
+diff --git a/services/audioflinger/PlaybackTracks.h b/services/audioflinger/PlaybackTracks.h
+index a2df29b29b..71c4f6c384 100644
+--- a/services/audioflinger/PlaybackTracks.h
++++ b/services/audioflinger/PlaybackTracks.h
+@@ -117,6 +117,12 @@ public:
+             int         auxEffectId() const { return mAuxEffectId; }
+     virtual status_t    getTimestamp(AudioTimestamp& timestamp);
+             void        signal();
++            status_t    getDualMonoMode(audio_dual_mono_mode_t* mode);
++            status_t    setDualMonoMode(audio_dual_mono_mode_t mode);
++            status_t    getAudioDescriptionMixLevel(float* leveldB);
++            status_t    setAudioDescriptionMixLevel(float leveldB);
++            status_t    getPlaybackRateParameters(audio_playback_rate_t* playbackRate);
++            status_t    setPlaybackRateParameters(const audio_playback_rate_t& playbackRate);
+ 
+ // implement FastMixerState::VolumeProvider interface
+     virtual gain_minifloat_packed_t getVolumeLR();
+@@ -281,6 +287,10 @@ protected:
+     /** How many frames should be in the buffer before the track is considered ready */
+     const size_t        mFrameCountToBeReady;
+ 
++    audio_dual_mono_mode_t mDualMonoMode = AUDIO_DUAL_MONO_MODE_OFF;
++    float               mAudioDescriptionMixLevel = -std::numeric_limits<float>::infinity();
++    audio_playback_rate_t  mPlaybackRateParameters = AUDIO_PLAYBACK_RATE_INITIALIZER;
++
+ private:
+     void                interceptBuffer(const AudioBufferProvider::Buffer& buffer);
+     template <class F>
+diff --git a/services/audioflinger/Tracks.cpp b/services/audioflinger/Tracks.cpp
+index f286d8a61d..f38d7d7a05 100644
+--- a/services/audioflinger/Tracks.cpp
++++ b/services/audioflinger/Tracks.cpp
+@@ -54,6 +54,60 @@
+ 
+ namespace android {
+ 
++// Validation methods for input
++namespace {
++
++status_t validateAudioDescriptionMixLevel(float leveldB)
++{
++    constexpr float MAX_AUDIO_DESCRIPTION_MIX_LEVEL = 48.f;
++    return std::isnan(leveldB) || leveldB > MAX_AUDIO_DESCRIPTION_MIX_LEVEL ? BAD_VALUE : OK;
++}
++
++status_t validateDualMonoMode(audio_dual_mono_mode_t dualMonoMode)
++{
++    switch (dualMonoMode) {
++        case AUDIO_DUAL_MONO_MODE_OFF:
++        case AUDIO_DUAL_MONO_MODE_LR:
++        case AUDIO_DUAL_MONO_MODE_LL:
++        case AUDIO_DUAL_MONO_MODE_RR:
++        return OK;
++    }
++    return BAD_VALUE;
++}
++
++status_t validatePlaybackRateFallbackMode(
++        audio_timestretch_fallback_mode_t fallbackMode)
++{
++    switch (fallbackMode) {
++        case AUDIO_TIMESTRETCH_FALLBACK_CUT_REPEAT:
++            break; // warning if not listed.
++        case AUDIO_TIMESTRETCH_FALLBACK_DEFAULT:
++        case AUDIO_TIMESTRETCH_FALLBACK_MUTE:
++        case AUDIO_TIMESTRETCH_FALLBACK_FAIL:
++            return OK;
++    }
++    return BAD_VALUE;
++}
++
++status_t validatePlaybackRateStretchMode(audio_timestretch_stretch_mode_t stretchMode)
++{
++    switch (stretchMode) {
++        case AUDIO_TIMESTRETCH_STRETCH_DEFAULT:
++        case AUDIO_TIMESTRETCH_STRETCH_SPEECH:
++            return OK;
++    }
++    return BAD_VALUE;
++}
++
++status_t validatePlaybackRate(const audio_playback_rate_t& playbackRate)
++{
++    if (playbackRate.mSpeed < 0.f || playbackRate.mPitch < 0.f) return BAD_VALUE;
++    return validatePlaybackRateFallbackMode(playbackRate.mFallbackMode) ?:
++            validatePlaybackRateStretchMode(playbackRate.mStretchMode);
++}
++
++} // namespace
++
+ using media::VolumeShaper;
+ // ----------------------------------------------------------------------------
+ //      TrackBase
+@@ -367,12 +421,45 @@ status_t AudioFlinger::TrackHandle::getTimestamp(AudioTimestamp& timestamp)
+     return mTrack->getTimestamp(timestamp);
+ }
+ 
+-
+ void AudioFlinger::TrackHandle::signal()
+ {
+     return mTrack->signal();
+ }
+ 
++status_t AudioFlinger::TrackHandle::getDualMonoMode(audio_dual_mono_mode_t* mode)
++{
++    return mTrack->getDualMonoMode(mode);
++}
++
++status_t AudioFlinger::TrackHandle::setDualMonoMode(audio_dual_mono_mode_t mode)
++{
++    return validateDualMonoMode(mode) ?: mTrack->setDualMonoMode(mode);
++}
++
++status_t AudioFlinger::TrackHandle::getAudioDescriptionMixLevel(float* leveldB)
++{
++    return mTrack->getAudioDescriptionMixLevel(leveldB);
++}
++
++status_t AudioFlinger::TrackHandle::setAudioDescriptionMixLevel(float leveldB)
++{
++    return validateAudioDescriptionMixLevel(leveldB)
++            ?: mTrack->setAudioDescriptionMixLevel(leveldB);
++}
++
++status_t AudioFlinger::TrackHandle::getPlaybackRateParameters(
++        audio_playback_rate_t* playbackRate)
++{
++    return mTrack->getPlaybackRateParameters(playbackRate);
++}
++
++status_t AudioFlinger::TrackHandle::setPlaybackRateParameters(
++        const audio_playback_rate_t& playbackRate)
++{
++    return validatePlaybackRate(playbackRate)
++            ?: mTrack->setPlaybackRateParameters(playbackRate);
++}
++
+ status_t AudioFlinger::TrackHandle::onTransact(
+     uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags)
+ {
+@@ -1452,6 +1539,108 @@ void AudioFlinger::PlaybackThread::Track::signal()
+     }
+ }
+ 
++status_t AudioFlinger::PlaybackThread::Track::getDualMonoMode(audio_dual_mono_mode_t* mode)
++{
++    status_t status = INVALID_OPERATION;
++    if (isOffloadedOrDirect()) {
++        sp<ThreadBase> thread = mThread.promote();
++        if (thread != nullptr) {
++            PlaybackThread *t = (PlaybackThread *)thread.get();
++            Mutex::Autolock _l(t->mLock);
++            status = t->mOutput->stream->getDualMonoMode(mode);
++            ALOGD_IF((status == NO_ERROR) && (mDualMonoMode != *mode),
++                    "%s: mode %d inconsistent", __func__, mDualMonoMode);
++        }
++    }
++    return status;
++}
++
++status_t AudioFlinger::PlaybackThread::Track::setDualMonoMode(audio_dual_mono_mode_t mode)
++{
++    status_t status = INVALID_OPERATION;
++    if (isOffloadedOrDirect()) {
++        sp<ThreadBase> thread = mThread.promote();
++        if (thread != nullptr) {
++            auto t = static_cast<PlaybackThread *>(thread.get());
++            Mutex::Autolock lock(t->mLock);
++            status = t->mOutput->stream->setDualMonoMode(mode);
++            if (status == NO_ERROR) {
++                mDualMonoMode = mode;
++            }
++        }
++    }
++    return status;
++}
++
++status_t AudioFlinger::PlaybackThread::Track::getAudioDescriptionMixLevel(float* leveldB)
++{
++    status_t status = INVALID_OPERATION;
++    if (isOffloadedOrDirect()) {
++        sp<ThreadBase> thread = mThread.promote();
++        if (thread != nullptr) {
++            auto t = static_cast<PlaybackThread *>(thread.get());
++            Mutex::Autolock lock(t->mLock);
++            status = t->mOutput->stream->getAudioDescriptionMixLevel(leveldB);
++            ALOGD_IF((status == NO_ERROR) && (mAudioDescriptionMixLevel != *leveldB),
++                    "%s: level %.3f inconsistent", __func__, mAudioDescriptionMixLevel);
++        }
++    }
++    return status;
++}
++
++status_t AudioFlinger::PlaybackThread::Track::setAudioDescriptionMixLevel(float leveldB)
++{
++    status_t status = INVALID_OPERATION;
++    if (isOffloadedOrDirect()) {
++        sp<ThreadBase> thread = mThread.promote();
++        if (thread != nullptr) {
++            auto t = static_cast<PlaybackThread *>(thread.get());
++            Mutex::Autolock lock(t->mLock);
++            status = t->mOutput->stream->setAudioDescriptionMixLevel(leveldB);
++            if (status == NO_ERROR) {
++                mAudioDescriptionMixLevel = leveldB;
++            }
++        }
++    }
++    return status;
++}
++
++status_t AudioFlinger::PlaybackThread::Track::getPlaybackRateParameters(
++        audio_playback_rate_t* playbackRate)
++{
++    status_t status = INVALID_OPERATION;
++    if (isOffloadedOrDirect()) {
++        sp<ThreadBase> thread = mThread.promote();
++        if (thread != nullptr) {
++            auto t = static_cast<PlaybackThread *>(thread.get());
++            Mutex::Autolock lock(t->mLock);
++            status = t->mOutput->stream->getPlaybackRateParameters(playbackRate);
++            ALOGD_IF((status == NO_ERROR) &&
++                    !isAudioPlaybackRateEqual(mPlaybackRateParameters, *playbackRate),
++                    "%s: playbackRate inconsistent", __func__);
++        }
++    }
++    return status;
++}
++
++status_t AudioFlinger::PlaybackThread::Track::setPlaybackRateParameters(
++        const audio_playback_rate_t& playbackRate)
++{
++    status_t status = INVALID_OPERATION;
++    if (isOffloadedOrDirect()) {
++        sp<ThreadBase> thread = mThread.promote();
++        if (thread != nullptr) {
++            auto t = static_cast<PlaybackThread *>(thread.get());
++            Mutex::Autolock lock(t->mLock);
++            status = t->mOutput->stream->setPlaybackRateParameters(playbackRate);
++            if (status == NO_ERROR) {
++                mPlaybackRateParameters = playbackRate;
++            }
++        }
++    }
++    return status;
++}
++
+ //To be called with thread lock held
+ bool AudioFlinger::PlaybackThread::Track::isResumePending() {
+ 
+diff --git a/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp b/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp
+index 152ac0c00f..e4e61063cb 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp
+@@ -584,6 +584,9 @@ status_t SwAudioOutputDescriptor::open(const audio_config_t *config,
+         lConfig.offload_info.duration_us = -1;
+         lConfig.offload_info.has_video = true; // conservative
+         lConfig.offload_info.is_streaming = true; // likely
++        lConfig.offload_info.encapsulation_mode = lConfig.offload_info.encapsulation_mode;
++        lConfig.offload_info.content_id = lConfig.offload_info.content_id;
++        lConfig.offload_info.sync_id = lConfig.offload_info.sync_id;
+     }
+ 
+     mFlags = (audio_output_flags_t)(mFlags | flags);
+-- 
+2.29.0
+
