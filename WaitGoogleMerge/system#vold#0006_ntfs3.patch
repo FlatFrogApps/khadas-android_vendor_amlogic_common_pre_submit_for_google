@@ -1,0 +1,38 @@
+From 2113d7fbec32fd53b67e91afde0c6b515cb0f8f8 Mon Sep 17 00:00:00 2001
+From: "yongqiang.tang" <yongqiang.tang@amlogic.com>
+Date: Tue, 27 Sep 2022 11:18:24 +0800
+Subject: [PATCH] fs: support fs ntfs3 Chinese characters [1/1]
+
+PD#SWPL-68837
+
+Problem:
+support ntfs3 filesystem Chinese characters
+
+Solution:
+support ntfs3 filesystem Chinese characters
+
+Verify:
+on T3 am301
+
+Signed-off-by: yongqiang.tang <yongqiang.tang@amlogic.com>
+Change-Id: Iaeb497cacee2fcb90224a017a97c45c485898899
+---
+ fs/Ntfs.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/Ntfs.cpp b/fs/Ntfs.cpp
+index 79f6202a..40e6b7e7 100644
+--- a/fs/Ntfs.cpp
++++ b/fs/Ntfs.cpp
+@@ -85,7 +85,7 @@ status_t Mount(const std::string& source, const std::string& target, bool ro,
+                 bool createLost) {
+ 
+     auto mountData = android::base::StringPrintf(
+-        "locale=utf8,uid=%d,gid=%d,fmask=%o,dmask=%o",
++        "iocharset=utf8,uid=%d,gid=%d,fmask=%o,dmask=%o",
+             ownerUid, ownerGid, permMask, permMask);
+ 
+     std::vector<std::string> cmd;
+-- 
+2.25.1
+
