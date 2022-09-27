@@ -1,0 +1,56 @@
+From 0e4a0d1675bcb7bbffe997ce9c613d092693f639 Mon Sep 17 00:00:00 2001
+From: "sipang.luo" <sipang.luo@amlogic.com>
+Date: Tue, 27 Sep 2022 17:31:15 +0800
+Subject: [PATCH 2/2] TvAudio:Adjust the device priority when setting the
+ volume [1/1]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+PD#SWPL-92443
+
+Problem:
+HDMI in input BT/USBspeaker output，the ARC is silent after
+BT/USBspeaker is disconnected，frequency ：3/3 comparison: 0629 OK.
+
+Solution:
+When adjusting the volume, ARC should take precedence over SPK.
+
+Verify:
+Android R
+
+Signed-off-by: sipang.luo <sipang.luo@amlogic.com>
+Change-Id: Ifa532bfeb6e6a6c83e4e70830024d55257d7b41c
+---
+ services/audiopolicy/common/include/policy.h | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/services/audiopolicy/common/include/policy.h b/services/audiopolicy/common/include/policy.h
+index 07f1458091..07eb268e04 100644
+--- a/services/audiopolicy/common/include/policy.h
++++ b/services/audiopolicy/common/include/policy.h
+@@ -242,14 +242,17 @@ static inline audio_devices_t apm_extract_one_audio_device(
+         if (deviceTypes.count(AUDIO_DEVICE_OUT_WIRED_HEADPHONE) != 0) {
+             return AUDIO_DEVICE_OUT_WIRED_HEADPHONE;
+         /*[Amlogic end]----------------------------------------------------------*/
+-        } else if (deviceTypes.count(AUDIO_DEVICE_OUT_SPEAKER) != 0) {
+-            return AUDIO_DEVICE_OUT_SPEAKER;
+-        } else if (deviceTypes.count(AUDIO_DEVICE_OUT_SPEAKER_SAFE) != 0) {
+-            return AUDIO_DEVICE_OUT_SPEAKER_SAFE;
++        /*[Amlogic start]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
++        /* Change-Id: Ib224a60546ab5e8e46b528bd60f70c9274da0858 */
+         } else if (deviceTypes.count(AUDIO_DEVICE_OUT_HDMI_ARC) != 0) {
+             return AUDIO_DEVICE_OUT_HDMI_ARC;
+         } else if (deviceTypes.count(AUDIO_DEVICE_OUT_AUX_LINE) != 0) {
+             return AUDIO_DEVICE_OUT_AUX_LINE;
++        } else if (deviceTypes.count(AUDIO_DEVICE_OUT_SPEAKER) != 0) {
++            return AUDIO_DEVICE_OUT_SPEAKER;
++        } else if (deviceTypes.count(AUDIO_DEVICE_OUT_SPEAKER_SAFE) != 0) {
++            return AUDIO_DEVICE_OUT_SPEAKER_SAFE;
++       /*[Amlogic end]----------------------------------------------------------*/
+         } else if (deviceTypes.count(AUDIO_DEVICE_OUT_SPDIF) != 0) {
+             return AUDIO_DEVICE_OUT_SPDIF;
+         } else {
+-- 
+2.25.1
+
