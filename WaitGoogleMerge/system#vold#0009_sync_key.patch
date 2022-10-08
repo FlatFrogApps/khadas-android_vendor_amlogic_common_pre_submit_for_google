@@ -1,0 +1,106 @@
+From 3345a2a98c2867bb8c34b8a22a6cd2a1d35aeea8 Mon Sep 17 00:00:00 2001
+From: Eric Biggers <ebiggers@google.com>
+Date: Tue, 16 Feb 2021 15:59:17 -0800
+Subject: [PATCH] Sync parent directory in storeKeyAtomically()
+
+When an FBE or metadata encryption key is created, it's important that
+it be persisted to disk right away; otherwise the device may fail to
+boot after an unclean shutdown.  storeKey() has the needed fsync()s.
+However, storeKeyAtomically() doesn't, as it doesn't fsync() the parent
+directory of key_path after it renames tmp_path to it.
+
+Two callers do fsync() the parent directory themselves, but others
+don't.  E.g., the metadata encryption key doesn't get properly synced.
+
+Therefore, add the needed fsync() to storeKeyAtomically() so that it
+gets done for everyone.
+
+Also remove the now-unneeded fsync()s from the two callers that did it
+themselves.
+
+Change-Id: I342ebd94f0a3d2bf3a7a443c35b6bda0f12e1ab2
+---
+ FsCrypt.cpp    | 2 --
+ KeyStorage.cpp | 1 +
+ KeyStorage.h   | 3 ++-
+ Utils.cpp      | 4 ++++
+ Utils.h        | 2 ++
+ 5 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/FsCrypt.cpp b/FsCrypt.cpp
+index c62eb25..31533c7 100644
+--- a/FsCrypt.cpp
++++ b/FsCrypt.cpp
+@@ -463,7 +463,6 @@ bool fscrypt_initialize_systemwide_keys() {
+         return false;
+     LOG(INFO) << "Wrote per boot key reference to:" << per_boot_ref_filename;
+ 
+-    if (!android::vold::FsyncDirectory(device_key_dir)) return false;
+     return true;
+ }
+ 
+@@ -705,7 +704,6 @@ static bool fscrypt_rewrap_user_key(userid_t user_id, int serial,
+     if (!get_ce_key_new_path(directory_path, paths, &ce_key_path)) return false;
+     if (!android::vold::storeKeyAtomically(ce_key_path, user_key_temp, store_auth, ce_key))
+         return false;
+-    if (!android::vold::FsyncDirectory(directory_path)) return false;
+     return true;
+ }
+ 
+diff --git a/KeyStorage.cpp b/KeyStorage.cpp
+index fb94ae5..457bb66 100644
+--- a/KeyStorage.cpp
++++ b/KeyStorage.cpp
+@@ -661,6 +661,7 @@ bool storeKeyAtomically(const std::string& key_path, const std::string& tmp_path
+         PLOG(ERROR) << "Unable to move new key to location: " << key_path;
+         return false;
+     }
++    if (!FsyncParentDirectory(key_path)) return false;
+     LOG(DEBUG) << "Created key: " << key_path;
+     return true;
+ }
+diff --git a/KeyStorage.h b/KeyStorage.h
+index a8908d4..5fded41 100644
+--- a/KeyStorage.h
++++ b/KeyStorage.h
+@@ -55,7 +55,8 @@ bool storeKey(const std::string& dir, const KeyAuthentication& auth, const KeyBu
+ // Create a directory at the named path, and store "key" in it as storeKey
+ // This version creates the key in "tmp_path" then atomically renames "tmp_path"
+ // to "key_path" thereby ensuring that the key is either stored entirely or
+-// not at all.
++// not at all.  All the needed files and directories are also fsync'ed to ensure
++// that the key is actually persisted to disk.
+ bool storeKeyAtomically(const std::string& key_path, const std::string& tmp_path,
+                         const KeyAuthentication& auth, const KeyBuffer& key);
+ 
+diff --git a/Utils.cpp b/Utils.cpp
+index c74feb4..c1fbf8f 100644
+--- a/Utils.cpp
++++ b/Utils.cpp
+@@ -1371,6 +1371,10 @@ bool FsyncDirectory(const std::string& dirname) {
+     return true;
+ }
+ 
++bool FsyncParentDirectory(const std::string& path) {
++    return FsyncDirectory(android::base::Dirname(path));
++}
++
+ bool writeStringToFile(const std::string& payload, const std::string& filename) {
+     android::base::unique_fd fd(TEMP_FAILURE_RETRY(
+         open(filename.c_str(), O_WRONLY | O_CREAT | O_NOFOLLOW | O_TRUNC | O_CLOEXEC, 0666)));
+diff --git a/Utils.h b/Utils.h
+index cf85136..87beced 100644
+--- a/Utils.h
++++ b/Utils.h
+@@ -183,6 +183,8 @@ bool pathExists(const std::string& path);
+ 
+ bool FsyncDirectory(const std::string& dirname);
+ 
++bool FsyncParentDirectory(const std::string& path);
++
+ bool writeStringToFile(const std::string& payload, const std::string& filename);
+ 
+ void ConfigureMaxDirtyRatioForFuse(const std::string& fuse_mount, unsigned int max_ratio);
+-- 
+2.34.1
+
