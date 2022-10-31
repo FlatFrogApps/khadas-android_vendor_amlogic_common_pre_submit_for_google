@@ -1,4 +1,4 @@
-From 3e0273ad116fc886f92a720db8d4b422b77aa6e7 Mon Sep 17 00:00:00 2001
+From ab2449d65333c1b07526df00de219f764d0ad7bf Mon Sep 17 00:00:00 2001
 From: "an.xi" <an.xi@amlogic.com>
 Date: Fri, 8 Jul 2022 14:36:50 +0800
 Subject: [PATCH] cec: add property of sending <Inactive Source> and update
@@ -27,12 +27,12 @@ Signed-off-by: an.xi <an.xi@amlogic.com>
 ---
  .../hdmi/HdmiCecLocalDevicePlayback.java      | 21 +++++------
  .../server/hdmi/HdmiCecLocalDeviceSource.java |  5 +--
- .../server/hdmi/HdmiControlService.java       |  5 ++-
+ .../server/hdmi/HdmiControlService.java       |  8 ++++-
  .../server/policy/PhoneWindowManager.java     | 35 +++++++++++++++++++
- 4 files changed, 49 insertions(+), 17 deletions(-)
+ 4 files changed, 52 insertions(+), 17 deletions(-)
 
 diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
-index 3382076331f7..f7af104329a9 100644
+index 3382076331f7..f7af104329a9 100755
 --- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
 +++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDevicePlayback.java
 @@ -44,6 +44,8 @@ import java.util.Locale;
@@ -75,7 +75,7 @@ index 3382076331f7..f7af104329a9 100644
          }
          switch (standbyAction) {
 diff --git a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceSource.java b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceSource.java
-index 0939a5b31d29..905366d719dd 100644
+index 0939a5b31d29..905366d719dd 100755
 --- a/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceSource.java
 +++ b/services/core/java/com/android/server/hdmi/HdmiCecLocalDeviceSource.java
 @@ -101,10 +101,7 @@ abstract class HdmiCecLocalDeviceSource extends HdmiCecLocalDevice {
@@ -91,26 +91,29 @@ index 0939a5b31d29..905366d719dd 100644
  
      @ServiceThreadOnly
 diff --git a/services/core/java/com/android/server/hdmi/HdmiControlService.java b/services/core/java/com/android/server/hdmi/HdmiControlService.java
-index bc42f3b2fe7e..aee0c6ebca93 100644
+index b5c9cf2645e4..c6c1bb378ef3 100644
 --- a/services/core/java/com/android/server/hdmi/HdmiControlService.java
 +++ b/services/core/java/com/android/server/hdmi/HdmiControlService.java
-@@ -3233,7 +3233,10 @@ public class HdmiControlService extends SystemService {
+@@ -3225,7 +3225,13 @@ public class HdmiControlService extends SystemService {
          }
          mPowerStatus = HdmiControlManager.POWER_STATUS_STANDBY;
          for (HdmiCecLocalDevice device : mCecController.getLocalDeviceList()) {
 -            device.onStandby(mStandbyMessageReceived, standbyAction);
 +            // playback standby is done in sendStandby method.
-+            if (device.getType() != HdmiDeviceInfo.DEVICE_PLAYBACK) {
++            if (device.getType() == HdmiDeviceInfo.DEVICE_PLAYBACK
++                && (standbyAction == STANDBY_SCREEN_OFF)) {
++                HdmiLogger.debug("screen off standby is operated in sendStandby previously.");
++            } else {
 +                device.onStandby(mStandbyMessageReceived, standbyAction);
 +            }
          }
          mStandbyMessageReceived = false;
          mCecController.runOnIoThread(()->{
 diff --git a/services/core/java/com/android/server/policy/PhoneWindowManager.java b/services/core/java/com/android/server/policy/PhoneWindowManager.java
-index f894672e3cfc..c9dad9e6f0c2 100644
+index e7b2d59c0e9c..0360d8d81062 100755
 --- a/services/core/java/com/android/server/policy/PhoneWindowManager.java
 +++ b/services/core/java/com/android/server/policy/PhoneWindowManager.java
-@@ -1155,6 +1155,12 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+@@ -1177,6 +1177,12 @@ public class PhoneWindowManager implements WindowManagerPolicy {
      }
  
      private void goToSleep(long eventTime, int reason, int flags) {
@@ -123,7 +126,7 @@ index f894672e3cfc..c9dad9e6f0c2 100644
          mRequestedOrGoingToSleep = true;
          mPowerManager.goToSleep(eventTime, reason, flags);
      }
-@@ -1509,6 +1515,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+@@ -1540,6 +1546,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
              if (manager != null) {
                  client = manager.getPlaybackClient();
              }
@@ -133,7 +136,7 @@ index f894672e3cfc..c9dad9e6f0c2 100644
              mHdmiControl = new HdmiControl(client);
          }
          return mHdmiControl;
-@@ -1534,6 +1543,20 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+@@ -1565,6 +1574,20 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                  }
              });
          }
@@ -154,7 +157,7 @@ index f894672e3cfc..c9dad9e6f0c2 100644
      }
  
      private void launchAllAppsAction() {
-@@ -4004,6 +4027,18 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+@@ -4025,6 +4048,18 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                  }
                  break;
              }
